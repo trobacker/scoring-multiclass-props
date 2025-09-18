@@ -1,0 +1,252 @@
+---
+title: "Scoring Counts and Proportions for VNH"
+format: html
+editor: visual
+---
+
+## Intro
+
+This Quarto document is to look at some simple examples of looking at evaluating predictions of multi-class population proportions inspired by the [Variant Nowcast Hub](https://github.com/reichlab/variant-nowcast-hub/).
+
+## Notation
+
+We issue a forecast in the form of latent proportions $\hat{\theta}^{(1)}\ldots, \hat{\theta}^{(100)}$. We observe $C=(C_1, \ldots, C_k)$, the vector of observed counts for each of the $K$ classes for a particular observation (location and target date), and let $N=\sum_k C_k$ be the total number of counts across all classes for that observation. The variation in $C$ depends on $N$. Thus, accurate forecasts of the observed $C$ would require us to model and forecast $N$, which is not of epidemiological interest and we think of as a nuisance parameter. However, $N$ maybe important in capturing variation for evaluation purposes.
+
+To avoid a situation where the distribution of the prediction target depends on $N$, our scoring method requires modelers to submit $100$ samples $\theta^{(1)},\ldots, \theta^{(100)}$ from the predictive distribution for $\theta$. We use the total number of observed counts, $N$, and the class proportion nowcasts $\theta^{(1)},\ldots, \theta^{(100)}$ to generate predictions for observed class counts, $\hat{C}$, by sampling from a $Multinomial(N,\hat{\theta}^{(s)})$ distribution.
+
+We (modeling group) were revisiting the idea of scoring on counts vs. proportions. Are they the same? Why use the multinomial sampling procedure? Here is some effort to look at this question more fundamentally.
+
+## Illustration
+
+We use the `scoringRules` package to calculate the energy score for a multivariate probabilistic forecast.
+
+```{r}
+library(scoringRules)
+library(brms)
+```
+
+Let's set up a couple simple examples:
+
+```{r}
+# Imagine we have a fixed theta and some observed counts:
+x1_true <- c(5,5,5) # true observed counts
+n1 <- sum(x1_true) # total number of counts
+x1_true_prop <- x1_true/n1 # true proportions/theta
+x1 <- c(4,5,6) # a forecasted count distribution
+x1_prop <- x1/n1 # equivalent forecasted proportions
+
+x2_true <- c(2,3,5) # ditto, different day or location
+n2 <- sum(x2_true)
+x2_true_prop <- x2_true/n2
+x2 <- c(0,3,8)
+x2_prop <- x2/n2
+```
+
+More generally, teams would be submitting 100 vectors in `x1_prop` and `x2_prop`. You can think of these two forecasts as being for 2 different times or locations.
+
+Now, suppose $X$ is the vector of counts from the forecasted distribution conditional on $N$. The idea being that modeler submits proportions but if we know the $N$ we can convert to counts. Let $p_x = X/N$ be the proportions of $X$ and for an observed vector of counts $y$, $p_y=y/N$ (what counts or proportions were actually observed on a given day/location).
+
+It seems easy to show that an energy score on the count scale can also be done on the proportion scale, assuming $N>0$ is fixed:
+
+$$
+\begin{eqnarray*}
+ES(F,y) &=& \mathbb{E} ||X-y||-\frac{1}{2}\mathbb{E}||X-X'|| \\
+&=& \frac{N}{N}\mathbb{E} ||X-y||-\frac{N}{N}\frac{1}{2}\mathbb{E}||X-X'|| \quad \mbox{multiply by $1$}\\
+&=& N\left(\mathbb{E} \left\Vert\frac{X}{N}-\frac{y}{N}\right\Vert-\frac{1}{2}\mathbb{E}\left\Vert\frac{X}{N}-\frac{X'}{N}\right\Vert \right)\\
+&=& N\left(\mathbb{E}\Vert p_X - p_y \Vert - \frac{1}{2}\mathbb{E}\Vert p_X - p_{X'} \Vert \right) \\
+&=& N \cdot ES(F, p_y)
+\end{eqnarray*}
+$$
+
+$X$ and $X'$ are independent random vectors from the forecast distribution $F$. So the energy score on the count scale is a multiple of that on the proportion scale. Aggregate scores are still valid too. A quick verification:
+
+```{r}
+es_sample(y = x1_true, dat = as.matrix(x1))
+n1*es_sample(y = x1_true_prop, dat = as.matrix(x1_prop))
+```
+
+```{r}
+# Aggregating scores
+es_1 <- es_sample(y = x1_true, dat = as.matrix(x1))
+es_2 <- es_sample(y = x2_true, dat = as.matrix(x2))
+
+es_1_prop <- n1*es_sample(y = x1_true_prop,
+                          dat = as.matrix(x1_prop))
+es_2_prop <- n2*es_sample(y = x2_true_prop, 
+                          dat = as.matrix(x2_prop))
+mean(c(es_1,es_2))
+mean(c(es_1_prop, es_2_prop))
+```
+
+```{r}
+# A sample of size 100 proportions submitted
+# doesn't matter what PRNG seed you use
+x1_vec <- rmultinom(n = 100, size = n1, prob = x1_true_prop)
+x1_vec_prop <- apply(x1_vec, 2, function(x){x/n1}) 
+
+es_sample(y = x1_true, dat = x1_vec)
+n1*es_sample(y = x1_true_prop, dat = x1_vec_prop)
+```
+
+So, why score on counts and not proportions?
+
+I think another way to think about it is, why do the multinomial sampling if we can just score on proportions anyway? We do the multinomial sampling as a kind of Monte Carlo estimate of the variation in what could happen (on the count scale) given a predicted proportion. That is, for each proportion provided by a modeler $\hat{\theta}^{(s)}$, we generate 100 samples of counts $\hat{C}^{(s)}$, by sampling from a $Multinomial(N,\hat{\theta}^{(s)})$ distribution. This variation would not be captured by just giving more estimates of $\theta$ -- that would uncertainty would require modelers to estimate $N$.
+
+(The following paragraph is not a good idea, but it's here for thought) However, perhaps we could use a Dirichlet distribution to sample additional $\hat{\theta}$'s given a $\hat{\theta}^{(s)}$, instead of multinomial sampling, and score on the proportions weighted by the sample size on that day and location ($n$ in the proof above). Dirichlet parameters, $\alpha$, are NOT the same a class probabilities - it's the modelers task to model the class probabilities.
+
+The fundamental idea though is that we're getting a further estimate of variability of $\hat{\theta}^{(s)}$ which *depends on* $N$ (or $n$ above) because $N$ is highly variable across time/locations. This uncertainty might be incorporated into a model such as a Dirichlet-Multinomial model? But, we want a general scoring rule, not just for a good model.
+
+```{r}
+# What if we implement multinomial sampling?
+set.seed(42)
+x1_vec <- rmultinom(n = 100, size = n1, prob = x1_true_prop)
+x1_vec_prop <- apply(x1_vec, 2, function(x){x/n1}) 
+
+all_counts <- matrix(nrow = 3, ncol = 0) 
+
+for(col in 1:ncol(x1_vec_prop)){
+  probs <- x1_vec_prop[,col]
+  counts <- rmultinom(n = 100, size = n1, prob = probs)
+  all_counts <- cbind(all_counts, counts)
+}
+print(dim(all_counts))
+```
+
+```{r}
+# Not surprising and expected:
+es_sample(y = x1_true, dat = all_counts)
+n1* es_sample(y = x1_true_prop, 
+              dat = apply(all_counts, 2, function(x){x/n1}))
+```
+
+Could we simply draw more proportions? No, I don't think so, at least not for the context of the VNH - simply drawing more $\theta$'s may not reflect the uncertainty that's present from an observed $N$.
+
+```{r}
+### Dirichlet parameters, alpha, are NOT the same a class probabilities. 
+# Taking more proportions
+# library(brms)
+# set.seed(42)
+# x1_dirichlet_props <- rdirichlet(n = 10000, alpha = x1_true_prop)
+# es_sample(y = x1_true_prop, dat = t(x1_dirichlet_props))
+```
+
+Test a true underlying parameter distribution many times (e.g. 1000), generate a true $\theta$, test scoring on multinomial sampling process and just proportions from underlying process?
+
+```{r}
+# Imagine we have a fixed theta and some observed counts:
+x_true <- c(1,1,5) # true observed counts
+## Problem with this approach, proportions defined by counts -> c(0,0,#) -> only one category has a non-zero probability - see next chunk for alternative
+
+n <- sum(x_true) # total number of counts
+x_true_prop <- x_true/n # true proportions/theta
+#x <- c(4,5,6) # a forecasted count distribution
+#x_prop <- x/n # equivalent forecasted proportions
+
+nsim = 1000
+n = sum(x_true)
+print(n)
+multinom_draws <- c(1, 10, 100)
+es_statements <- as.numeric()
+
+par(mfrow=c(3,2))
+
+for(draws in multinom_draws){
+  es_counts <- rep(NA,nsim)
+  es_props <- rep(NA, nsim)
+  es_logical <- rep(NA,nsim)
+  
+  for(i in 1:nsim){
+    # Random x from true props
+    x_vec <- rmultinom(n = draws, size = n, prob = x_true_prop)
+    
+    # submitted proportions
+    x_vec_prop <- apply(x_vec, 2, function(x){x/n}) 
+    
+    # Multinomial sampling from true proportions
+    x_vec <- apply(x_vec_prop, 2, 
+                    function(x) {rmultinom(1, n, x)})
+    
+    # Scored multinomial samples
+    es_counts[i] <- es_sample(y = x_true, dat = x_vec)
+    
+    # Scored submitted proportions (on count scale)
+    es_props[i] <- n*es_sample(y = x_true_prop, dat = x_vec_prop)
+    
+    # Record how often Multinomial Sampling ES > Proportions score
+    es_logical[i] <- es_counts[i] > es_props[i]
+  }
+  
+  es_statements <- c(es_statements, mean(es_logical))
+  
+  hist(es_counts, main = paste0("ES for Multi. Samp.\n (Counts) N draws = ", draws))
+  hist(es_props, main = paste0("ES from True Props\n (Counts) N draws = ", draws))
+  
+}
+print(es_statements)
+```
+
+```{r}
+# Alternative, define proportions first:
+n = 100
+x_true_prop <- rdirichlet(n=1, alpha = c(1,1,1))
+x_true <- rmultinom(n = 1, size = n, prob = x_true_prop)
+
+nsim = 1000
+print(n)
+multinom_draws <- c(1, 10, 100)
+es_statements <- as.numeric()
+
+par(mfrow=c(3,2))
+
+for(draws in multinom_draws){
+  es_counts <- rep(NA,nsim)
+  es_props <- rep(NA, nsim)
+  es_logical <- rep(NA,nsim)
+  
+  for(i in 1:nsim){
+    # Random x from true props
+    x_vec <- rmultinom(n = draws, size = n, prob = x_true_prop)
+    
+    # submitted proportions
+    x_vec_prop <- apply(x_vec, 2, function(x){x/n}) 
+    
+    # Multinomial sampling from true proportions
+    x_vec <- apply(x_vec_prop, 2, 
+                    function(x) {rmultinom(1, n, x)})
+    
+    # Scored multinomial samples
+    es_counts[i] <- es_sample(y = as.vector(x_true), dat = x_vec)
+    
+    # Scored submitted proportions (on count scale)
+    es_props[i] <- n*es_sample(y = as.vector(x_true_prop), dat = x_vec_prop)
+    
+    # Record how often Multinomial Sampling ES > Proportions score
+    es_logical[i] <- es_counts[i] > es_props[i]
+  }
+  
+  es_statements <- c(es_statements, mean(es_logical))
+  
+  hist(es_counts, main = paste0("ES for Multi. Samp.\n (Counts) N draws = ", draws))
+  hist(es_props, main = paste0("ES from True Props\n (Counts) N draws = ", draws))
+  
+}
+print(es_statements)
+```
+
+And notably I would expect that the point score would converge to approximating the integral well when N was large (but would want to see a demonstration or simulation)
+
+Might be interesting to brute-force the “exact” energy score for some cases with small N and a small number of categories (3 categories, N = 3)
+
+Layer of multinomial sampling used to approximate an exact calculation of the energy score which is ultimately just a fancy integral. We have two approximations happening:
+
+1.  Discrete sample from a posterior predictive distribution.
+
+2.  Approximation of the fully enumerated multinomial observation process (for large N this is necessary).
+
+Three related points about the chosen observation/predictive functional form
+
+1.  The multinomial isn't particularly special: this is a specific example of the general idea of scoring a latent quantity by scoring the associated (conditional) posterior predictive distribution
+
+2.  We may want to think about how this eval method performs when the observation distribution is misspecified (i.e. the true counts are drawn from some sampling distribution conditional on f_T that isn't a multinomial)
+
+3.  The forecaster can in fact hedge against (2) if they don't believe the true sampling distribution is multinomial by noisifying their reported forecast vector. We think\*\* (subject to revision as we analyze, which we should) that's largely a feature not a bug.
