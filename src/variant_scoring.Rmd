@@ -1,0 +1,964 @@
+---
+title: "Variant scoring setup and exploration"
+author: ""
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message=FALSE, warning = FALSE)
+set.seed(1717177)
+source("./helper-functions.R")
+```
+
+## Introduction
+
+The goal of this document is to provide an overall conceptual introduction to some of the challenges surrounding scoring variant nowcasts.
+
+The following text is from draft guidelines for the variant nowcast hub:
+
+> We will collect nowcasts for $\theta$, a $K$-vector, where $K$ is the number of clades we are interested in, and whose $k$th element, $\theta_k$ , is the true *proportion* of all current SARS-CoV-2 infections which are clade $k$. We observe $C = (C_1, … , C_K)$, the vector of observed counts for each of the $K$ clades of interest for a particular location and target date, and let $N = \sum_k C_k$ be the total number of sequences collected for that date and location (for simplicity here, we are omitting subscripts for date and location). Variation in $C$ depends on the total number of sequenced samples, $N$. Thus, accurate nowcasts of the observed $C$, would require teams to model and forecast $N$, which is not of epidemiological interest.
+> To avoid a situation where the distribution of the prediction target depends on $N$, the total number of sequenced samples on a given day, nowcasts are to be submitted in the form of 100 samples $\hat \theta^{(1)}, …, \hat \theta^{(100)}$ from the predictive distribution for $\theta$. Historical data show that 90 days is sufficient time for nearly all sequences to be tested and reported and therefore for $C$ to represent a stable estimate of relative clade prevalences. Therefore, 90 days after each submission date, the hub will use the total number of observed samples, $N$, and the clade proportion nowcasts $\hat \theta^{(1)}, …, \hat \theta^{(100)}$ to generate nowcasts for observed clade counts, $\hat C$, by sampling from multinomial distributions. Specifically, the hub will generate predictions for observed clade counts $\hat C^{(1)}, …, \hat C^{(100)}$ where each $\hat C^{(s)}$ is drawn from a $Multinomial(N, \hat \theta^{(s)})$ distribution.
+
+## Simple example
+
+```{r}
+n_samp = 100 ## number of samples to use from predictive distribution
+alpha = c(2, 4, 4) ## dirichlet params
+```
+
+We have a setting where three variants are being predicted. Let us assume that a model's underlying predictive distribution for $\theta$ is $f(\theta) =$ Dirichlet(`r paste(alpha, collapse=",")`), so the expected value of a proportion from this distribution is (`r paste(alpha/sum(alpha), collapse=", ")`) for Variants A, B and C, respectively. Below, we have this model generate $N =$ `r n_samp` samples, $\hat \theta^{(1)}, \dots, \hat \theta^{`r paste(n_samp)`}$ for $\theta$, that are drawn independently from $f(\theta)$.
+
+
+
+The following ternary plot shows the true predictive distribution of theta (in colored contours) as well as the `r n_samp` samples drawn.
+
+```{r, eval=FALSE, echo=FALSE}
+## remotes::install_github('marvinschmitt/ggsimplex')
+#library(ggsimplex)
+library(ggplot2)
+## sample 10 dirichlet
+set.seed(123)
+library(brms)
+data = rdirichlet(n = 10, alpha = alpha)
+data = as.data.frame(data)
+colnames(data) = c("pmp_1", "pmp_2", "pmp_3")
+data$pmp = with(data, make_list_column(pmp_1, pmp_2, pmp_3))
+ggplot() +
+  coord_fixed(ratio=1, xlim=c(0, 1), ylim=c(0, 1))+
+  theme_void() +
+  geom_simplex_canvas() + 
+  geom_simplex_point(data = data, aes(pmp = pmp),
+                     size = 0.7, color = "firebrick", alpha = 0.8)
+df_dirichlet = data.frame(true_model = 1)
+df_dirichlet$Alpha = list(c(2, 4, 8))
+ggplot() +
+  coord_fixed(ratio=1, xlim=c(0, 1), ylim=c(0, 1))+
+  theme_void() +
+  geom_simplex_canvas() + 
+  stat_simplex_density(data=df_dirichlet, fun = ddirichlet,
+                       args = alist(Alpha=Alpha))
+ggplot() +
+  coord_fixed(ratio=1, xlim=c(0, 1), ylim=c(0, 1))+
+  theme_void() +
+  geom_simplex_canvas() + 
+  stat_simplex_density(data=df_dirichlet, fun = ddirichlet, col_scale = "linear",
+                       args = alist(Alpha=Alpha)) +
+  geom_simplex_point(data = data, aes(pmp = pmp),
+                   size = 0.7, color = "firebrick", alpha = 0.8)
+```
+
+
+```{r show-predictive-distribution}
+library(Ternary)
+par(mar = c(0.3, 0.3, 1.3, 0.3))
+## make the plot
+TernaryPlot(alab = "Variant A prevalence \u2192", 
+            blab = "\u2190 Variant B prevalence ", 
+            clab = "Variant C prevalence \u2192",
+            main = "True predictive distribution with samples",
+            region = Ternary:::ternRegionDefault/100,
+            point = "right", lab.cex = 0.8, grid.minor.lines = 0,
+            grid.lty = "solid", col = rgb(0.9, 0.9, 0.9), grid.col = "white", 
+            axis.col = rgb(0.6, 0.6, 0.6), ticks.col = rgb(0.6, 0.6, 0.6),
+            axis.rotate = FALSE,
+            padding = 0.08)
+## add colors
+cols <- TernaryPointValues(Func = dd_func, alpha = alpha)
+ColourTernary(cols,
+              spectrum = rev(hcl.colors(10, palette = "viridis", alpha = 0.6)))
+## draw datapoints
+thetas <- lapply(FUN = draw_one_dirichlet, 
+                 X = rep(1, n_samp), 
+                 alpha = alpha)
+AddToTernary(graphics::points, 
+             thetas,
+             pch=20)
+```
+
+
+## Scoring count observations using predictive samples
+
+```{r}
+c_1 <- c(1, 2, 2)
+c_2 <- c(10, 20, 20)
+c_3 <- c(100, 200, 200)
+```
+
+Now, let's say that there are three observations of counts $C_1 = (`r paste(c_1, collapse=", ")`)$, $C_2 = (`r paste(c_2, collapse=", ")`)$ and $C_3 = (`r paste(c_3, collapse=", ")`)$ of the three variants. We wish to score the model's predictions (as represented by these `r n_samp` samples), for these observations. Note that these points correspond to the same point in the sample space for a prediction of $\theta$ but not for a prediction of $C$ because they have different total counts.
+
+For each of the predictive samples, there is an implied multinomial distribution conditional on a given $N$. For this simple situation, we can compute the exact multinomial distribution and plot it it directly.
+
+
+## Evaluation for N=5
+Here are a selection of 12 of the individual implied multinomial distributions (i.e. 12 draws from the predictive distribution) with N=5, where the size of the point corresponds to the mass of the pmf. A red x marks where the observation is.
+
+```{r plot-5-sample-multinomial}
+par(mfrow=c(3, 4), mar=c(.1, .1, .1, .1))
+for(i in 1:12)
+  plot_implied_multinomial(n=sum(c_1), theta=thetas[[i]], c=c_1)
+```
+
+We can also compute and plot the mixture of implied multinomial distributions. While only 12 samples are shown above, the plot below on the left shows the mixture of all `r n_samp` samples. To generate this distribution, we compute the exact probabilities for each implied multinomial and average them at each point in the sample space. For comparison, on the right we plot the Dirichlet-multinomial distribution based on the parameters from the known true underlying predictive distribution.
+
+
+```{r plot-mixture-1}
+par(mfrow=c(1,2), mar=c(.1, .1, .1, .1))
+plot_implied_multinomial_mixture(n=sum(c_1), theta=thetas, c=c_1)
+plot_dirichlet_multinomial(n=sum(c_1), alpha=alpha, c=c_1)
+```
+
+
+## Evaluation for N=50
+
+Now we can plot 12 of the implied multinomial distributions for each of the `r n_samp` samples with N=50.
+```{r plot-50-sample-multinomial}
+par(mfrow=c(3, 4), mar=c(.1, .1, .1, .1))
+for(i in 1:12)
+  plot_implied_multinomial(n=sum(c_2), theta=thetas[[i]], c=c_2)
+```
+
+And again we plot the mixture of implied multinomials and the true Dirichlet-multinomial.
+```{r plot-mixture-2}
+par(mfrow=c(1,2), mar=c(.1, .1, .1, .1))
+plot_implied_multinomial_mixture(n=sum(c_2), theta=thetas, c=c_2)
+plot_dirichlet_multinomial(n=sum(c_2), alpha=alpha, c=c_2)
+```
+
+## Evaluation for N=500
+
+Here is the mixture of implied multinomials and the true Dirichlet-multinomial for a larger sample size.
+```{r plot-mixture-3}
+## this takes a while to run, could turn off for faster dev.
+par(mfrow=c(1,2), mar=c(.1, .1, .1, .1))
+plot_implied_multinomial_mixture(n=sum(c_3), theta=thetas, c=c_3)
+plot_dirichlet_multinomial(n=sum(c_3), alpha=alpha, c=c_3)
+```
+
+
+
+## Conclusions and observations
+
+1. When $N$ is small, the mixture of implied multinomials appears to approximate the true Dirichlet-multinomial better than when $N$ is larger, where there are definite gaps between the distributions from each sample.
+
+## Still to do
+- with one (or more) observations: 
+  - calculate energy score based on true D-M
+  - calculate energy score based on mixture of exact multinomials
+  - calculate energy score based on drawing a sample of size K from each multinomial
+  - calculate log score based on true D-M
+  - calculate log score based on mixture of multinomials
+  
+  
+## Energy and Log Scores
+
+We use the `scoringRules` package to calculate the energy and log scores for 
+observations. Because we're interested in ensembles of predictions we presume
+that our forecast distributions can only be given as simulated samples or 
+MCMC output. In the univariate case, we would use the CRPS and log scores. In 
+the multivariate case we use the energy score and log scores. 
+
+
+  
+```{r, eval=TRUE, echo=FALSE }
+library(scoringRules)
+```
+
+
+
+```{r, eval=FALSE, echo=FALSE}
+c_2
+thetas[1:2]
+```
+
+```{r}
+# Turn the "data" thetas into a matrix/array for `scoringRules` use
+thetas_mat <- simplify2array(thetas)
+dim(thetas_mat)
+```
+
+Notes: we need to turn the data into a matrix format for `scoringRules` functions.
+Above, we have 3 rows that correspond to 100 samples of each of the alpha_i's.
+
+```{r}
+es_sample(y = c_2, dat = thetas_mat) # energy score 
+vs_sample(y = c_2, dat = thetas_mat) # variogram score
+```
+
+```{r}
+# Reminder of true proportions/rates
+alpha
+alpha/sum(alpha)
+```
+
+
+```{r}
+# Simple Energy Score examples
+es_sample(y = c(2,1,2), dat = thetas_mat)
+
+# Closest to true alpha proportions! -> Lowest energy score
+es_sample(y = c(1,2,2), dat = thetas_mat) # c(1,2,2) = c_1
+
+es_sample(y = c(2,2,1), dat = thetas_mat)
+```
+
+```{r}
+## Dividing into rates/proportions
+# Simple Energy Score examples
+es_sample(y = c(2,1,2)/5, dat = thetas_mat)
+
+# Closest to true alpha proportions! -> Lowest energy score
+es_sample(y = c(1,2,2)/5, dat = thetas_mat) # c(1,2,2) = c_1
+
+es_sample(y = c(2,2,1)/5, dat = thetas_mat)
+```
+
+
+```{r}
+es_sample(y = c(20,10,20), dat = thetas_mat)
+es_sample(y = c_2, dat = thetas_mat) # Lowest
+es_sample(y = c(20,20,10), dat = thetas_mat)
+```
+
+```{r}
+# "large" sample proportions yielding same results as smaller one
+es_sample(y = c(200,100,200)/500, dat = thetas_mat)
+es_sample(y = c_3/sum(c_3), dat = thetas_mat) # Lowest
+es_sample(y = c(200,200,100)/500, dat = thetas_mat)
+```
+
+
+
+```{r}
+# Simple log score examples
+logs_sample(y = c(1,2,1)/5, dat = thetas_mat)
+mean(logs_sample(y = c(2,2,1)/5, dat = thetas_mat))
+
+# Closest to true proportions alpha -> Lowest log score
+logs_sample(y = c(1,1,2)/5, dat = thetas_mat)
+mean(logs_sample(y = c(1,2,2)/5, dat = thetas_mat))
+
+logs_sample(y = c(2,2,0)/5, dat = thetas_mat)
+mean(logs_sample(y = c(2,3,0)/5, dat = thetas_mat))
+```
+
+
+
+
+```{r}
+# Simple test over several samples
+# for(obs in list(c_1, c_2, c_3, c(0,1,0), c(2,1,1), c(1, 2, 1), c(1, 1, 2), c(10, 10, 20), c(100, 100, 200)) ) {
+#   print(obs)
+#   print(es_sample(y = obs, dat = thetas_mat))
+# }
+```
+
+Notes: energy score gets larger with increase is sample size. Dividing by total 
+size results in the same energy scores when proportions are the same. 
+
+
+```{r}
+## Generate samples from dirichlet-multinomial & evaluate energy score
+
+# n many samples with sample size = size and proportions/rates alpha
+# n many forecasted outputs (say 100 samples from a model posterior)
+x_obs = rdirmnom(n = 100, size = 500, alpha = alpha)
+
+# Energy score for one forecast sample
+es_sample(y = x_obs[1,]/sum(x_obs[i,]), dat = thetas_mat)
+```
+
+
+```{r}
+# n rows, len(alpha) columns
+dim(x_obs)
+```
+
+
+```{r}
+# Average energy score for all samples (forecasts) (raw counts)
+energy = c()
+for (i in 1:nrow(x_obs)) {
+  energy <- append(energy, es_sample(y = x_obs[i,], dat = thetas_mat))
+}
+mean(energy)
+```
+
+```{r}
+## Proportions
+energy = c()
+for (i in 1:nrow(x_obs)) {
+  energy <- append(energy, es_sample(y = x_obs[i,]/sum(x_obs[i,]), dat = thetas_mat))
+}
+mean(energy)
+```
+
+
+```{r}
+# Have to use proportions here
+log_score = c()
+for (i in 1:nrow(x_obs)) {
+  # divide by sample `size` to get same scale
+  log_score <- append(log_score, logs_sample(y = x_obs[i,]/sum(x_obs[i,]), 
+                                             dat = thetas_mat)) 
+  # returns score for each alpha_i, same result if mean(log score)
+}
+mean(log_score)
+```
+
+
+## Based on mixture of exact multinomials
+
+```{r}
+x_obs_multi <- mc2d::rmultinomial(n = 100, size = 5, prob = alpha)
+
+## Proportions
+energy = c()
+for (i in 1:nrow(x_obs)) {
+  energy <- append(energy, es_sample(y = x_obs_multi[i,]/sum(x_obs_multi[i,]), 
+                                     dat = thetas_mat))
+}
+mean(energy)
+```
+
+Notes: Mean energy score here (~0.232) is higher than for Dirichlet-Multinomial score of (~0.158). Theta's were drawn from the 
+predictive distribution of a Dir-Multi(alpha).
+
+
+
+```{r}
+x_obs_multi <- mc2d::rmultinomial(n = 100, size = 5, prob = alpha)
+
+## Proportions
+energy = c()
+for (i in 1:nrow(x_obs)) {
+  energy <- append(energy, es_sample(y = x_obs_multi[i,]/sum(x_obs_multi[i,]), dat = thetas_mat))
+}
+mean(energy)
+```
+
+
+```{r}
+x_obs_multi <- mc2d::rmultinomial(n = 100, size = 5, prob = c(2,2,2))
+
+## Proportions
+energy = c()
+for (i in 1:nrow(x_obs)) {
+  energy <- append(energy, es_sample(y = x_obs_multi[i,]/sum(x_obs_multi[i,]), dat = thetas_mat))
+}
+mean(energy)
+```
+
+
+
+
+```{r}
+x_obs_dirmnom <- rdirmnom(n = 100, size = 5, alpha = c(2,2,2))
+
+## Proportions
+energy = c()
+for (i in 1:nrow(x_obs)) {
+  energy <- append(energy, es_sample(y = x_obs_dirmnom[i,]/sum(x_obs_dirmnom[i,]), dat = thetas_mat))
+}
+mean(energy)
+```
+
+```{r}
+x_obs_dirmnom <- rdirmnom(n = 100, size = 50, alpha = c(2,2,1))
+
+## Proportions
+energy = c()
+for (i in 1:nrow(x_obs)) {
+  energy <- append(energy, es_sample(y = x_obs_dirmnom[i,]/sum(x_obs_dirmnom[i,]), dat = thetas_mat))
+}
+mean(energy)
+```
+
+```{r}
+## Mean energy score
+for(n_size in c(10, seq(from = 100, to = 1000, length.out = 10)) ){
+  x_obs_dirmnom <- rdirmnom(n = 1000, size = n_size, alpha = alpha)
+  
+  ## Proportions
+  energy = c()
+  for (i in 1:nrow(x_obs)) {
+    energy <- append(energy, es_sample(y = x_obs_dirmnom[i,]/sum(x_obs_dirmnom[i,]), dat = thetas_mat))
+  }
+  print(mean(energy))
+}
+```
+
+```{r}
+## Mean LOG score with true alpha
+for(n_size in c(10, seq(from = 100, to = 1000, length.out = 10)) ){
+  x_obs_dirmnom <- rdirmnom(n = 1000, size = n_size, alpha = alpha)
+  
+  ## Proportions
+  log_score = c()
+  for (i in 1:nrow(x_obs)) {
+    log_score <- append(log_score, logs_sample(y = x_obs_dirmnom[i,]/sum(x_obs_dirmnom[i,]), dat = thetas_mat))
+  }
+  print(mean(log_score))
+}
+```
+
+
+```{r}
+## Mean LOG score with wrong alpha
+for(n_size in c(10, seq(from = 100, to = 1000, length.out = 10)) ){
+  x_obs_dirmnom <- rdirmnom(n = 1000, size = n_size, alpha = c(4,4,2))
+  
+  ## Proportions
+  log_score = c()
+  for (i in 1:nrow(x_obs)) {
+    log_score <- append(log_score, logs_sample(y = x_obs_dirmnom[i,]/sum(x_obs_dirmnom[i,]), dat = thetas_mat))
+  }
+  print(mean(log_score))
+}
+```
+
+
+```{r}
+n_samp2 = 1000
+thetas2 <- lapply(FUN = draw_one_dirichlet, 
+                 X = rep(1, n_samp2), 
+                 alpha = alpha)
+thetas_mat2 <- simplify2array(thetas2)
+dim(thetas_mat2)
+```
+
+```{r}
+## Theta_mat2 has 1000 theta hats
+for(n_size in c(10, seq(from = 100, to = 1000, length.out = 10)) ){
+  x_obs_dirmnom <- rdirmnom(n = 1000, size = n_size, alpha = alpha)
+  
+  ## Proportions
+  energy = c()
+  for (i in 1:nrow(x_obs)) {
+    energy <- append(energy, es_sample(y = x_obs_dirmnom[i,]/sum(x_obs_dirmnom[i,]), dat = thetas_mat2))
+  }
+  print(mean(energy))
+}
+```
+
+
+```{r}
+## Theta_mat2 has 1000 theta hats and wrong alpha
+for(n_size in c(10, seq(from = 100, to = 1000, length.out = 10)) ){
+  x_obs_dirmnom <- rdirmnom(n = 1000, size = n_size, alpha = c(4,4,2))
+  
+  ## Proportions
+  energy = c()
+  for (i in 1:nrow(x_obs)) {
+    energy <- append(energy, es_sample(y = x_obs_dirmnom[i,]/sum(x_obs_dirmnom[i,]), dat = thetas_mat2))
+  }
+  print(mean(energy))
+}
+```
+
+It seems like energy scores give a more stable score result compared to log 
+scores overall. Energy score seems consistent whether we use 100 theta-hats or
+1000 theta-hats.
+
+
+```{r}
+## Mean LOG score theta_mat2 with true alpha
+for(n_size in c(10, seq(from = 100, to = 1000, length.out = 10)) ){
+  x_obs_dirmnom <- rdirmnom(n = 1000, size = n_size, alpha = alpha)
+  
+  ## Proportions
+  log_score = c()
+  for (i in 1:nrow(x_obs)) {
+    log_score <- append(log_score, logs_sample(y = x_obs_dirmnom[i,]/sum(x_obs_dirmnom[i,]), dat = thetas_mat2))
+  }
+  print(mean(log_score))
+}
+```
+
+```{r}
+## Mean LOG score theta_mat2 with wrong alpha
+for(n_size in c(10, seq(from = 100, to = 1000, length.out = 10)) ){
+  x_obs_dirmnom <- rdirmnom(n = 1000, size = n_size, alpha = c(4,4,2))
+  
+  ## Proportions
+  log_score = c()
+  for (i in 1:nrow(x_obs)) {
+    log_score <- append(log_score, logs_sample(y = x_obs_dirmnom[i,]/sum(x_obs_dirmnom[i,]), dat = thetas_mat2))
+  }
+  print(mean(log_score))
+}
+```
+
+There's a bigger difference between 'similar' log scores than energy scores. 
+Drawback of energy score: similar results may not be discerned well. 
+(Discrimination ability of energy score)
+
+Two-stage model assessment?
+
+Assess Briar score?
+
+## Simulation Study 1
+
+```{r}
+n_samp = 100 ## number of samples to use from predictive distribution
+alpha = c(2, 4, 4) ## dirichlet params
+```
+
+```{r}
+## remotes::install_github('marvinschmitt/ggsimplex')
+library(ggsimplex)
+library(ggplot2)
+## sample 10 dirichlet
+set.seed(123)
+library(brms)
+data = rdirichlet(n = 10, alpha = alpha)
+data = as.data.frame(data)
+colnames(data) = c("pmp_1", "pmp_2", "pmp_3")
+data$pmp = with(data, make_list_column(pmp_1, pmp_2, pmp_3))
+ggplot() +
+  coord_fixed(ratio=1, xlim=c(0, 1), ylim=c(0, 1))+
+  theme_void() +
+  geom_simplex_canvas() + 
+  geom_simplex_point(data = data, aes(pmp = pmp),
+                     size = 0.7, color = "firebrick", alpha = 0.8)
+df_dirichlet = data.frame(true_model = 1)
+df_dirichlet$Alpha = list(c(2, 4, 8))
+ggplot() +
+  coord_fixed(ratio=1, xlim=c(0, 1), ylim=c(0, 1))+
+  theme_void() +
+  geom_simplex_canvas() + 
+  stat_simplex_density(data=df_dirichlet, fun = ddirichlet,
+                       args = alist(Alpha=Alpha))
+ggplot() +
+  coord_fixed(ratio=1, xlim=c(0, 1), ylim=c(0, 1))+
+  theme_void() +
+  geom_simplex_canvas() + 
+  stat_simplex_density(data=df_dirichlet, fun = ddirichlet, col_scale = "linear",
+                       args = alist(Alpha=Alpha)) +
+  geom_simplex_point(data = data, aes(pmp = pmp),
+                   size = 0.7, color = "firebrick", alpha = 0.8)
+```
+
+```{r}
+library(Ternary)
+par(mar = c(0.3, 0.3, 1.3, 0.3))
+## make the plot
+TernaryPlot(alab = "Variant A prevalence \u2192", 
+            blab = "\u2190 Variant B prevalence ", 
+            clab = "Variant C prevalence \u2192",
+            main = "True predictive distribution with samples",
+            region = Ternary:::ternRegionDefault/100,
+            point = "up", lab.cex = 0.8, grid.minor.lines = 0,
+            grid.lty = "solid", col = rgb(0.9, 0.9, 0.9), grid.col = "white", 
+            axis.col = rgb(0.6, 0.6, 0.6), ticks.col = rgb(0.6, 0.6, 0.6),
+            axis.rotate = FALSE,
+            padding = 0.08)
+## add colors
+cols <- TernaryPointValues(Func = dd_func, alpha = alpha)
+ColourTernary(cols,
+              spectrum = rev(hcl.colors(10, palette = "viridis", alpha = 0.6)))
+## draw datapoints
+thetas <- lapply(FUN = draw_one_dirichlet, 
+                 X = rep(1, n_samp), 
+                 alpha = alpha)
+# AddToTernary(graphics::points, 
+#              thetas,
+#              pch=20)
+theta_true <- alpha/sum(alpha)
+theta_mode <- (alpha-1)/(sum(alpha)-length(alpha))
+AddToTernary(graphics::points, 
+             theta_true,
+             pch=20, col='red')
+AddToTernary(graphics::points, 
+             theta_mode,
+             pch=20, col='green')
+```
+Scoring on just the proportions for various $N$:
+
+```{r}
+set.seed(1234)
+
+par(mar = c(0.3, 0.3, 1.3, 0.3))
+## make the plot
+TernaryPlot(alab = "Variant A prevalence \u2192", 
+            blab = "\u2190 Variant B prevalence ", 
+            clab = "Variant C prevalence \u2192",
+            main = "True predictive distribution with samples",
+            region = Ternary:::ternRegionDefault/100,
+            point = "up", lab.cex = 0.8, grid.minor.lines = 0,
+            grid.lty = "solid", col = rgb(0.9, 0.9, 0.9), grid.col = "white", 
+            axis.col = rgb(0.6, 0.6, 0.6), ticks.col = rgb(0.6, 0.6, 0.6),
+            axis.rotate = FALSE,
+            padding = 0.08)
+## add colors
+cols <- TernaryPointValues(Func = dd_func, alpha = alpha)
+ColourTernary(cols,
+              spectrum = rev(hcl.colors(10, palette = "viridis", alpha = 0.6)))
+## draw datapoints
+thetas <- lapply(FUN = draw_one_dirichlet, 
+                 X = rep(1, n_samp), 
+                 alpha = alpha)
+AddToTernary(graphics::points,
+             thetas,
+             pch=20)
+theta_true <- alpha/sum(alpha)
+theta_mode <- (alpha-1)/(sum(alpha)-length(alpha))
+AddToTernary(graphics::points, 
+             theta_true,
+             pch=20, col='red')
+AddToTernary(graphics::points, 
+             theta_mode,
+             pch=20, col='green')
+```
+
+
+```{r}
+# Reproducibility
+set.seed(1234)
+
+# True alpha for Dir(alpha)
+alpha <- c(2, 4, 4)
+alpha_wrong <- c(4,4,2)
+
+N_samp <- c(1,10,100, 1000) # Number of theta samples
+
+for(n_samp in N_samp){
+  cat("For n_samps =", n_samp, "\n")
+  
+  # Draw example thetas from Dir(alpha)
+  thetas <- lapply(FUN = draw_one_dirichlet, 
+                   X = rep(1, n_samp), 
+                   alpha = alpha)
+  
+  # Convert to 3x100 matrix
+  thetas_matrix <- do.call(cbind, thetas)
+  
+  # Score using samples of size $N$ WITHOUT multinomial sampling
+  for(n in c(1,2,3,5,10,20,50,100)){
+    es <- n * es_sample(y = alpha, dat = thetas_matrix) # ES on counts = N * (ES on props)
+    es_wrong <- n * es_sample(y = alpha_wrong, dat = thetas_matrix)
+    cat("ES:", es, "\t ES wrong:", es_wrong, "\t N =",n, "\n")
+  }
+  cat("\n\n")
+}
+```
+
+```{r}
+## WIP
+# Reproducibility
+set.seed(1234)
+
+# True alpha for Dir(alpha)
+alpha <- c(2, 4, 4)
+alpha_wrong <- c(3,3,4)
+
+N_samp <- 10 # Number of theta samples c(1,10, 100)
+n_counts <- 5 # Number of counts of a given day
+
+
+nsim <- 1000 # Simulation runs
+
+es_correct <- rep(NA, nsim)
+es_incorrect <- rep(NA, nsim)
+
+for(i in 1:nsim){
+  if(i %% 100 == 0){print(paste0("nsim = ", i))}
+  
+  for(n_samp in N_samp){
+    # cat("For n_samps =", n_samp, "\n")
+    
+    # Draw example thetas from Dir(alpha)
+    thetas <- lapply(FUN = draw_one_dirichlet, 
+                     X = rep(1, n_samp), 
+                     alpha = alpha)
+    thetas_wrong <- lapply(FUN = draw_one_dirichlet, 
+                     X = rep(1, n_samp), 
+                     alpha = alpha_wrong)
+    
+    # Convert to 3x100 matrix
+    thetas_matrix <- do.call(cbind, thetas)
+    thetas_matrix_wrong <- do.call(cbind, thetas_wrong)
+    
+    # Score using samples of size $N$ WITHOUT multinomial sampling
+    for(n in n_counts){
+      es <- n * es_sample(y = alpha/sum(alpha), dat = thetas_matrix) # ES on counts = N * (ES on props)
+      es_wrong <- n * es_sample(y = alpha/sum(alpha), dat = thetas_matrix_wrong)
+      # cat("ES:", es, "\t ES wrong:", es_wrong, "\t N =",n, "\n")
+    }
+    # cat("\n\n")
+  }
+  es_correct[i] <- es
+  es_incorrect[i] <- es_wrong
+}
+
+
+# Plotting Histos
+breaks = 20
+h1 <- hist(es_correct, breaks = breaks, col = rgb(0, 0, 1, 0.4), plot=F)
+h2 <- hist(es_incorrect, breaks = breaks, col = rgb(1, 0, 0, 0.5), add = TRUE, plot = F)
+
+xlim_combined <- range(h1$breaks, h2$breaks)
+ylim_combined <- c(0, max(h1$counts, h2$counts))
+
+hist(es_correct,
+     main = paste0("Energy Scores for N = ", N_samp),
+     breaks = breaks,
+     col = rgb(0, 0, 1, 0.4), 
+     xlim = xlim_combined,
+     ylim = ylim_combined)
+hist(es_incorrect, 
+     breaks= breaks,
+     col = rgb(1, 0, 0, 0.5), 
+     add = TRUE)
+
+legend("topright",
+       legend = c("ES Correct", "ES Incorrect"),
+       fill = c(rgb(0, 0, 1, 0.4), rgb(1, 0, 0, 0.5)),
+       bty = "n")
+
+paste0("There are ", mean(es_incorrect < es_correct)*100, " percent of wrong alpha forecasts scored better than the true alpha forecast.")
+
+#hist(es_correct - es_incorrect)
+```
+
+
+
+
+
+```{r}
+## WITH multinomial sampling
+# Reproducibility
+set.seed(1234)
+
+# True alpha for Dir(alpha)
+alpha <- c(2, 4, 4)
+alpha_wrong <- c(3,3,4)
+
+N_samp <- 100 # Number of submitted thetas observed
+n_counts <- 5 # Number of counts of a given day
+N_multinomial <- 100 # Size of multinomial draws
+
+nsim <- 1000 # Simulation runs
+
+es_correct <- rep(NA, nsim)
+es_incorrect <- rep(NA, nsim)
+
+for(i in 1:nsim){
+  
+  if(i %% 100 == 0){print(paste0("nsim = ", i))}
+  
+  C <- rmultinom(n = 1, size = n_counts, prob = alpha/sum(alpha))
+  p <- C/n_counts # 
+  
+  for(n_samp in N_samp){
+    # cat("For n_samps =", n_samp, "\n")
+    
+    # Draw example thetas from Dir(alpha)
+    thetas <- lapply(FUN = draw_one_dirichlet, 
+                     X = rep(1, n_samp), 
+                     alpha = alpha)
+    thetas_wrong <- lapply(FUN = draw_one_dirichlet, 
+                     X = rep(1, n_samp), 
+                     alpha = alpha_wrong)
+    
+    # thetas_matrix <- matrix(nrow = 3, ncol = length(theta)*N_multinomial)
+    # thetas_matrix_wrong <- matrix(nrow = 3, ncol = length(theta)*N_multinomial)
+    
+    # Multinomial sampling
+    samp_multinomial_counts <- matrix(nrow = 3, ncol = 0)
+    samp_multinomial_counts_wrong <- matrix(nrow = 3, ncol = 0)
+
+        # Generate 100 multinomial counts for each proportions submitted in thetas
+        for(theta in thetas){
+          # Generate 100 multinomial observations
+          samp_counts <- rmultinom(n = N_multinomial, size = n_counts, prob = theta)
+          # Append each multinomial sample together for 10000 total
+          samp_multinomial_counts <- cbind(samp_multinomial_counts, samp_counts)
+        }
+    
+      # Generate 100 multinomial counts for each proportions submitted in thetas_wrong
+        for(theta in thetas_wrong){
+          # Generate 100 multinomial observations
+          samp_counts_wrong <- rmultinom(n = N_multinomial, size = n_counts, prob = theta)
+          # Append each multinomial sample together for 10000 total
+          samp_multinomial_counts_wrong <- cbind(samp_multinomial_counts_wrong, samp_counts_wrong)
+        }
+    
+    # Convert to 3x100 matrix
+    p_matrix <- samp_multinomial_counts / n_counts # Convert back to props
+    p_matrix_wrong <- samp_multinomial_counts_wrong / n_counts
+    
+    # Score using samples of size $N$ WITH multinomial sampling
+    for(n in c(1)){
+      # This is ES(F_hat(p), p) ~~ ES(F_)
+      es <- es_sample(y = as.numeric(p), dat = p_matrix) # ES on counts = N * (ES on props)
+      es_wrong <- es_sample(y = as.numeric(p), dat = p_matrix_wrong)
+      # cat("ES:", es, "\t ES wrong:", es_wrong, "\t N =",n, "\n")
+    }
+    # cat("\n\n")
+  }
+  es_correct[i] <- es
+  es_incorrect[i] <- es_wrong
+}
+
+
+# Plotting Histos
+breaks = 20
+h1 <- hist(es_correct, breaks = breaks, col = rgb(0, 0, 1, 0.4), plot=F)
+h2 <- hist(es_incorrect, breaks = breaks, col = rgb(1, 0, 0, 0.5), add = TRUE, plot = F)
+
+xlim_combined <- range(h1$breaks, h2$breaks)
+ylim_combined <- c(0, max(h1$counts, h2$counts))
+
+hist(es_correct,
+     main = paste0("Energy Scores for N = ", N_samp),
+     breaks = breaks,
+     col = rgb(0, 0, 1, 0.4), 
+     xlim = xlim_combined,
+     ylim = ylim_combined)
+hist(es_incorrect, 
+     breaks= breaks,
+     col = rgb(1, 0, 0, 0.5), 
+     add = TRUE)
+
+legend("topright",
+       legend = c("ES Correct", "ES Incorrect"),
+       fill = c(rgb(0, 0, 1, 0.4), rgb(1, 0, 0, 0.5)),
+       bty = "n")
+
+paste0("There are ", mean(es_incorrect < es_correct)*100, " percent of wrong alpha forecasts scored better than the true alpha forecast.")
+```
+
+This demonstrates that even in low count settings, that the multinomial sampling
+scheme allows us to discriminate against the right and wrong forecast more distinctly.
+
+
+
+```{r, include = TRUE}
+#profile_file <- tempfile()
+#Rprof(profile_file, memory.profiling = TRUE)
+## FIX THE THETAS BEFORE DOING ANY OF THIS
+## WITH multinomial sampling
+# Reproducibility
+set.seed(1234)
+
+# True alpha for Dir(alpha)
+alpha <- c(2, 4, 4)
+alpha_wrong <- c(4,4,2)
+
+N_samp <- 100 # Number of submitted thetas observed
+n_counts <- 1 # Number of counts of a given day
+N_multinomial <- 100 # Size of multinomial draws
+
+nsim <- 1000 # Simulation runs
+
+es_correct <- rep(NA, nsim)
+es_incorrect <- rep(NA, nsim)
+
+for(i in 1:nsim){
+  if(i %% 100 == 0){print(paste0("nsim = ", i))}
+  for(n_samp in N_samp){
+    # cat("For n_samps =", n_samp, "\n")
+    
+    # Draw example thetas from Dir(alpha)
+    thetas <- lapply(FUN = draw_one_dirichlet, 
+                     X = rep(1, n_samp), 
+                     alpha = alpha)
+    thetas_wrong <- lapply(FUN = draw_one_dirichlet, 
+                     X = rep(1, n_samp), 
+                     alpha = alpha_wrong)
+    
+    # thetas_matrix <- matrix(nrow = 3, ncol = length(theta)*N_multinomial)
+    # thetas_matrix_wrong <- matrix(nrow = 3, ncol = length(theta)*N_multinomial)
+    
+    # Multinomial sampling
+    samp_multinomial_counts <- matrix(nrow = 3, ncol = 0)
+    samp_multinomial_counts_wrong <- matrix(nrow = 3, ncol = 0)
+
+      # Generate 100 multinomial counts for each proportions submitted in thetas
+        for(theta in thetas){
+          # Generate 100 multinomial observations
+          samp_counts <- rmultinom(n = N_multinomial, size = n_counts, prob = theta)
+          # Append each multinomial sample together for 10000 total
+          samp_multinomial_counts <- cbind(samp_multinomial_counts, samp_counts)
+        }
+    
+      # Generate 100 multinomial counts for each proportions submitted in thetas_wrong
+        for(theta in thetas_wrong){
+          # Generate 100 multinomial observations
+          samp_counts_wrong <- rmultinom(n = N_multinomial, size = n_counts, prob = theta)
+          # Append each multinomial sample together for 10000 total
+          samp_multinomial_counts_wrong <- cbind(samp_multinomial_counts_wrong, samp_counts_wrong)
+        }
+    
+    # Convert to 3x100 matrix
+    thetas_matrix <- samp_multinomial_counts / n_counts # Convert back to props
+    thetas_matrix_wrong <- samp_multinomial_counts_wrong / n_counts
+    
+    # Score using samples of size $N$ WITH multinomial sampling
+    for(n in c(1)){
+      es <- es_sample(y = alpha, dat = thetas_matrix) # ES on counts = N * (ES on props)
+      es_wrong <- es_sample(y = alpha, dat = thetas_matrix_wrong)
+      # cat("ES:", es, "\t ES wrong:", es_wrong, "\t N =",n, "\n")
+    }
+    # cat("\n\n")
+  }
+  es_correct[i] <- es
+  es_incorrect[i] <- es_wrong
+}
+
+#Rprof(NULL)
+# Now, we summarize the results for later analysis
+#profile_summary <- summaryRprof(profile_file)
+
+# Clean up the temporary file after use
+#unlink(profile_file)
+
+# Plotting Histos
+breaks = 20
+h1 <- hist(es_correct, breaks = breaks, col = rgb(0, 0, 1, 0.4), plot=F)
+h2 <- hist(es_incorrect, breaks = breaks, col = rgb(1, 0, 0, 0.5), add = TRUE, plot = F)
+
+xlim_combined <- range(h1$breaks, h2$breaks)
+ylim_combined <- c(0, max(h1$counts, h2$counts))
+
+hist(es_correct,
+     main = paste0("Energy Scores for N = ", N_samp),
+     breaks = breaks,
+     col = rgb(0, 0, 1, 0.4), 
+     xlim = xlim_combined,
+     ylim = ylim_combined)
+hist(es_incorrect, 
+     breaks= breaks,
+     col = rgb(1, 0, 0, 0.5), 
+     add = TRUE)
+
+legend("topright",
+       legend = c("ES Correct", "ES Incorrect"),
+       fill = c(rgb(0, 0, 1, 0.4), rgb(1, 0, 0, 0.5)),
+       bty = "n")
+
+paste0("There are ", mean(es_incorrect < es_correct)*100, " percent of wrong alpha forecasts scored better than the true alpha forecast.")
+```
