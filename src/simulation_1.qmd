@@ -180,7 +180,7 @@ es_mn_sampling <- function(alpha = c(2,4,4),
     
     samp_multinomial_counts_wrong <- do.call(
       cbind,
-      lapply(thetas_wrong, function(theta) rmultinom(n = N_multinomial, size = n_counts, prob = thetas))
+      lapply(thetas_wrong, function(theta) rmultinom(n = N_multinomial, size = n_counts, prob = theta))
     )
     
     # Proportions
