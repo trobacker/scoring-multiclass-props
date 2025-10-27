@@ -29,7 +29,7 @@ set.seed(42)
 ### Preallocate the forecast distributions
 # True alpha for Dir(alpha)
 alpha <- c(2, 4, 4)
-alpha_wrong <- c(5,5,5)
+alpha_wrong <- c(20,5,5)
 n_samp <- 100 # number of forecasted theta's
 
 # Draw forecasts from Dir(alpha) or Dir(alpha_wrong)
@@ -58,10 +58,6 @@ TernaryPlot(alab = "Variant A prevalence \u2192",
 cols <- TernaryPointValues(Func = dd_func, alpha = alpha)
 ColourTernary(cols,
               spectrum = rev(hcl.colors(10, palette = "viridis", alpha = 0.6)))
-## draw datapoints
-thetas <- lapply(FUN = draw_one_dirichlet, 
-                 X = rep(1, n_samp), 
-                 alpha = alpha)
 AddToTernary(graphics::points, 
              thetas,
              pch=20)
@@ -82,13 +78,9 @@ TernaryPlot(alab = "Variant A prevalence \u2192",
             axis.rotate = FALSE,
             padding = 0.08)
 ## add colors
-cols <- TernaryPointValues(Func = dd_func, alpha = c(5,5,5))
+cols <- TernaryPointValues(Func = dd_func, alpha = alpha_wrong)
 ColourTernary(cols,
               spectrum = rev(hcl.colors(10, palette = "viridis", alpha = 0.6)))
-## draw datapoints
-thetas <- lapply(FUN = draw_one_dirichlet, 
-                 X = rep(1, n_samp), 
-                 alpha = c(5,5,5))
 AddToTernary(graphics::points, 
              thetas_wrong,
              pch=20)
@@ -222,7 +214,8 @@ plot_sampling_results <- function(result){
   hist(result$es_incorrect, 
        breaks= breaks,
        col = rgb(1, 0, 0, 0.5), 
-       add = TRUE)
+       add = TRUE, 
+       xlab = "Energy Score")
   
   legend("topright",
          legend = c("ES Correct", "ES Incorrect"),
@@ -244,8 +237,11 @@ Fixed parameters:
 
 -   100 submitted samples (theta's)
 -   100 multinomial samples
--   1000 simulations where observed C/p change each time.
--   True alpha = c(2,4,4), wrong alpha = c(5,5,5)
+-   1000 simulations where observed C (and so p) change each time form Dir(alpha).
+-   Forecasts Run: True alpha = c(2,4,4)
+    -   (very incorrect), wrong alpha = c(10,1,1)
+    -   (less incorrect), wrong alpha = c(10,10,10)
+    -   (incorrect), wrong alpha = c(20,5,5)
 
 Varying Parameters:
 
@@ -334,4 +330,135 @@ result_mn5 <- es_mn_sampling(thetas = thetas,
                          alpha = alpha, seed = 46, nsim = 1000, n_counts = 500)
 plot_sampling_results(result_mn5)
 paste0("There are ", mean(result_mn5$es_incorrect < result_mn5$es_correct)*100, " percent of wrong alpha forecasts scored better than the true alpha forecast.")
+```
+
+```{r}
+library(tidyr)
+
+df_mn1 <- data.frame(es_correct = result_mn1$es_correct,
+           es_incorrect = result_mn1$es_incorrect,
+           sim = "mn1")
+
+df_mn2 <- data.frame(es_correct = result_mn2$es_correct,
+           es_incorrect = result_mn2$es_incorrect,
+           sim = "mn2")
+
+df_mn3 <- data.frame(es_correct = result_mn3$es_correct,
+           es_incorrect = result_mn3$es_incorrect,
+           sim = "mn3")
+
+df_mn4 <- data.frame(es_correct = result_mn4$es_correct,
+           es_incorrect = result_mn4$es_incorrect,
+           sim = "mn4")
+
+df_mn5 <- data.frame(es_correct = result_mn5$es_correct,
+           es_incorrect = result_mn5$es_incorrect,
+           sim = "mn5")
+
+df_nonmn1 <- data.frame(es_correct = result_notmn1$es_correct,
+           es_incorrect = result_notmn1$es_incorrect,
+           sim = "non-mn1")
+
+df_nonmn2 <- data.frame(es_correct = result_notmn2$es_correct,
+           es_incorrect = result_notmn2$es_incorrect,
+           sim = "non-mn2")
+
+df_nonmn3 <- data.frame(es_correct = result_notmn3$es_correct,
+           es_incorrect = result_notmn3$es_incorrect,
+           sim = "non-mn3")
+
+df_nonmn4 <- data.frame(es_correct = result_notmn4$es_correct,
+           es_incorrect = result_notmn4$es_incorrect,
+           sim = "non-mn4")
+
+df_nonmn5 <- data.frame(es_correct = result_notmn5$es_correct,
+           es_incorrect = result_notmn5$es_incorrect,
+           sim = "non-mn5")
+
+df_combo <- df_combo <- rbind(
+                              df_nonmn1,
+                              df_nonmn2,
+                              df_nonmn3,
+                              df_nonmn4,
+                              df_nonmn5,
+                              df_mn1, 
+                              df_mn2,
+                              df_mn3,
+                              df_mn4,
+                              df_mn5)
+
+# Reshape data to long format
+df_long <- df_combo %>%
+    pivot_longer(
+        cols = c(es_correct, es_incorrect),
+        names_to = "es",
+        values_to = "value"
+    )
+
+ggplot(data = df_long, aes(x = sim, y = value, fill = es)) +
+  geom_boxplot() +
+  theme_bw()
+
+# ggplot(data = df_long, aes(x = es, y = value, fill = es)) + 
+#   facet_wrap(~sim) + 
+#   geom_boxplot() + 
+#   theme_bw()
+```
+
+```{r}
+
+df_mn1 <- data.frame(es_diff = result_mn1$es_correct - result_mn1$es_incorrect,
+           sim = "mn1")
+
+df_mn2 <- data.frame(es_diff = result_mn2$es_correct - result_mn2$es_incorrect,
+           sim = "mn2")
+
+df_mn3 <- data.frame(es_diff = result_mn3$es_correct - result_mn3$es_incorrect,
+           sim = "mn3")
+
+df_mn4 <- data.frame(es_diff = result_mn4$es_correct - result_mn4$es_incorrect,
+           sim = "mn4")
+
+df_mn5 <- data.frame(es_diff = result_mn5$es_correct - result_mn5$es_incorrect,
+           sim = "mn5")
+
+df_nonmn1 <- data.frame(es_diff = result_notmn1$es_correct - result_notmn1$es_incorrect,
+           sim = "non-mn1")
+
+df_nonmn2 <- data.frame(es_diff = result_notmn2$es_correct - result_notmn2$es_incorrect,
+           sim = "non-mn2")
+
+df_nonmn3 <- data.frame(es_diff = result_notmn3$es_correct - result_notmn3$es_incorrect,
+           sim = "non-mn3")
+
+df_nonmn4 <- data.frame(es_diff = result_notmn4$es_correct - result_notmn4$es_incorrect,
+           sim = "non-mn4")
+
+df_nonmn5 <- data.frame(es_diff = result_notmn5$es_correct - result_notmn5$es_incorrect,
+           sim = "non-mn5")
+
+df_combo <- df_combo <- rbind(
+                              df_nonmn1,
+                              df_mn1,
+                              df_nonmn2,
+                              df_mn2,
+                              df_nonmn3,
+                              df_mn3,
+                              df_nonmn4,
+                              df_mn4,
+                              df_nonmn5,
+                              df_mn5)
+
+# Reshape data to long format
+# df_long <- df_combo %>%
+#     pivot_longer( 
+#         cols = c(es_correct, es_incorrect),
+#         names_to = "es",
+#         values_to = "value"
+#     )
+
+
+ggplot(data = df_combo, aes(x = sim, y = es_diff)) +
+  geom_boxplot() +
+  theme_bw()
 ```
