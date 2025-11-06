@@ -1,199 +1,179 @@
 ---
-title: "Simulations"
+title: "Energy Score Simulations: Multinomial Sampling vs Direct Scoring"
 format: html
 editor: visual
 ---
 
-## Quarto
+## Setup
 
-Quarto enables you to weave together content and executable code into a finished document. To learn more about Quarto see <https://quarto.org>.
-
-## Running Code
-
-When you click the **Render** button a document will be generated that includes both content and the output of embedded code. You can embed code like this:
+Load required libraries and helper functions:
 
 ```{r}
 library(ggplot2)
+library(tidyr)
+library(dplyr)
 library(ggsimplex)
 library(scoringRules)
 library(brms)
 library(Ternary)
+library(parallel)  # For parallel processing
 source("./helper-functions.R")
+
+# Detect number of cores (use n-2 to leave room for system)
+n_cores <- max(1, parallel::detectCores() - 2)
+cat("Using", n_cores, "cores for parallel processing\n")
 ```
 
-Initial set up.
+## Simulation Functions
+
+### WITHOUT multinomial sampling:
 
 ```{r}
-set.seed(42)
-
-### Preallocate the forecast distributions
-# True alpha for Dir(alpha)
-alpha <- c(2, 4, 4)
-alpha_wrong <- c(20,5,5)
-n_samp <- 100 # number of forecasted theta's
-
-# Draw forecasts from Dir(alpha) or Dir(alpha_wrong)
-thetas <- lapply(FUN = draw_one_dirichlet, 
-                 X = rep(1, n_samp), 
-                 alpha = alpha)
-thetas_wrong <- lapply(FUN = draw_one_dirichlet, 
-                 X = rep(1, n_samp), 
-                 alpha = alpha_wrong)
-```
-
-```{r}
-par(mar = c(0.3, 0.3, 1.3, 0.3))
-## make the plot
-TernaryPlot(alab = "Variant A prevalence \u2192", 
-            blab = "\u2190 Variant B prevalence ", 
-            clab = "Variant C prevalence \u2192",
-            main = "True Dirichlet latent proportions with samples",
-            region = Ternary:::ternRegionDefault/100,
-            point = "right", lab.cex = 0.8, grid.minor.lines = 0,
-            grid.lty = "solid", col = rgb(0.9, 0.9, 0.9), grid.col = "white", 
-            axis.col = rgb(0.6, 0.6, 0.6), ticks.col = rgb(0.6, 0.6, 0.6),
-            axis.rotate = FALSE,
-            padding = 0.08)
-## add colors
-cols <- TernaryPointValues(Func = dd_func, alpha = alpha)
-ColourTernary(cols,
-              spectrum = rev(hcl.colors(10, palette = "viridis", alpha = 0.6)))
-AddToTernary(graphics::points, 
-             thetas,
-             pch=20)
-```
-
-```{r}
-## Wrong alpha
-par(mar = c(0.3, 0.3, 1.3, 0.3))
-## make the plot
-TernaryPlot(alab = "Variant A prevalence \u2192", 
-            blab = "\u2190 Variant B prevalence ", 
-            clab = "Variant C prevalence \u2192",
-            main = "Wrong Dirichlet latent proportions with samples",
-            region = Ternary:::ternRegionDefault/100,
-            point = "right", lab.cex = 0.8, grid.minor.lines = 0,
-            grid.lty = "solid", col = rgb(0.9, 0.9, 0.9), grid.col = "white", 
-            axis.col = rgb(0.6, 0.6, 0.6), ticks.col = rgb(0.6, 0.6, 0.6),
-            axis.rotate = FALSE,
-            padding = 0.08)
-## add colors
-cols <- TernaryPointValues(Func = dd_func, alpha = alpha_wrong)
-ColourTernary(cols,
-              spectrum = rev(hcl.colors(10, palette = "viridis", alpha = 0.6)))
-AddToTernary(graphics::points, 
-             thetas_wrong,
-             pch=20)
-```
-
-Function to conduct scoring without multinomial sampling:
-
-```{r}
-## WITHOUT multinomial sampling
-es_sampling <- function(alpha = c(2,4,4), 
+# WITHOUT multinomial sampling (parallelized)
+es_sampling <- function(alpha = c(2,4,4),
                            thetas = NULL,
                            thetas_wrong = NULL,
-                           n_counts = 5, 
+                           n_counts = 5,
                            nsim = 1000,
-                           seed = 42){
-  # Reproducibility
-  set.seed(seed)
-  es_correct <- rep(NA, nsim)
-  es_incorrect <- rep(NA, nsim)
-  
-  # If we don't want to vary C/p across nsims
-  # C <- rmultinom(n = 1, size = n_counts, prob = alpha/sum(alpha))
-  # p <- C/n_counts
-  
-  for(i in 1:nsim){
-    
-    if(i %% 100 == 0){print(paste0("nsim = ", i))}
-    
-    ### For each simulation, we have a realization of counts/proportions based on n_counts
-    ## Maybe not vary this for each sim? 
-    C <- rmultinom(n = 1, size = n_counts, prob = alpha/sum(alpha))
-    p <- C/n_counts
-    
-    # Proportions
-    p_matrix <- matrix(unlist(thetas), nrow = 3, byrow = FALSE)
-    
-    p_matrix_wrong <- matrix(unlist(thetas_wrong), nrow = 3, byrow = FALSE)
-    
-    # This is ES(F_hat(p), p) ~~ ES(F_)
-    es <- es_sample(y = as.numeric(p), dat = p_matrix) # ES on counts = N * (ES on props)
-    es_wrong <- es_sample(y = as.numeric(p), dat = p_matrix_wrong)
-    
-    es_correct[i] <- es
-    es_incorrect[i] <- es_wrong
+                           seed = 42,
+                           parallel = TRUE,
+                           n_cores = parallel::detectCores() - 2){
+
+  # Pre-compute matrices once (more efficient)
+  p_matrix <- matrix(unlist(thetas), nrow = 3, byrow = FALSE)
+  p_matrix_wrong <- matrix(unlist(thetas_wrong), nrow = 3, byrow = FALSE)
+
+  if(parallel && n_cores > 1) {
+    # Parallel execution
+    results <- parallel::mclapply(1:nsim, function(i) {
+      set.seed(seed + i)  # Unique seed per iteration for reproducibility
+
+      # Generate observation
+      prob_vec <- as.numeric(brms::rdirichlet(1, alpha))
+      C <- rmultinom(n = 1, size = n_counts, prob = prob_vec)
+      p <- C / n_counts
+
+      # Calculate energy scores
+      es_correct <- scoringRules::es_sample(y = as.numeric(p), dat = p_matrix)
+      es_incorrect <- scoringRules::es_sample(y = as.numeric(p), dat = p_matrix_wrong)
+
+      return(c(es_correct = es_correct, es_incorrect = es_incorrect))
+    }, mc.cores = n_cores, mc.set.seed = FALSE)
+
+    # Convert results to vectors
+    results_matrix <- do.call(rbind, results)
+    es_correct <- results_matrix[, 1]
+    es_incorrect <- results_matrix[, 2]
+
+  } else {
+    # Sequential execution (fallback)
+    set.seed(seed)
+    es_correct <- rep(NA, nsim)
+    es_incorrect <- rep(NA, nsim)
+
+    for(i in 1:nsim){
+      if(i %% 100 == 0){print(paste0("nsim = ", i))}
+
+      prob_vec <- as.numeric(brms::rdirichlet(1, alpha))
+      C <- rmultinom(n = 1, size = n_counts, prob = prob_vec)
+      p <- C / n_counts
+
+      es_correct[i] <- scoringRules::es_sample(y = as.numeric(p), dat = p_matrix)
+      es_incorrect[i] <- scoringRules::es_sample(y = as.numeric(p), dat = p_matrix_wrong)
+    }
   }
-  
-  paste0("There are ", mean(es_incorrect < es_correct)*100, " percent of wrong alpha forecasts scored better than the true alpha forecast.")
-  
+
   return(list(es_correct = es_correct, es_incorrect = es_incorrect))
 }
 ```
 
-Function to conduct scoring with multinomial sampling:
+### WITH multinomial sampling:
 
 ```{r}
-## WITH multinomial sampling
-# Reproducibility
-es_mn_sampling <- function(alpha = c(2,4,4), 
+# WITH multinomial sampling (parallelized)
+es_mn_sampling <- function(alpha = c(2,4,4),
                            thetas = NULL,
                            thetas_wrong = NULL,
-                           n_counts = 5, 
+                           n_counts = 5,
                            nsim = 1000,
                            N_multinomial = 100,
-                           seed = 42){
-  set.seed(seed)
-  
-  #n_counts <- 5 # Number of counts of a given day
-  #N_multinomial <- 100 # Size of multinomial draws
-  
-  #nsim <- nsim # Simulation runs
-  
-  es_correct <- rep(NA, nsim)
-  es_incorrect <- rep(NA, nsim)
-  
-  for(i in 1:nsim){
-    
-    if(i %% 100 == 0){print(paste0("nsim = ", i))}
-    
-    ### For each simulation, we have a realization of counts/proportions based 
-    ### on n_counts from the true latent dirichlet dist. (a ground truth obs)###
-    C <- rmultinom(n = 1, size = n_counts, prob = alpha/sum(alpha))
-    p <- C/n_counts # proportions of obs counts
-  
-    # Generate all multinomial samples and bind them column-wise
-    samp_multinomial_counts <- do.call( # a matrix 
-      cbind,
-      lapply(thetas, function(theta) rmultinom(n = N_multinomial, size = n_counts, prob = theta))
-    )
-    
-    samp_multinomial_counts_wrong <- do.call(
-      cbind,
-      lapply(thetas_wrong, function(theta) rmultinom(n = N_multinomial, size = n_counts, prob = theta))
-    )
-    
-    # Proportions
-    p_matrix <- samp_multinomial_counts / n_counts # Convert back to props
-    p_matrix_wrong <- samp_multinomial_counts_wrong / n_counts
-      
-    # This is ES(F_hat(p), p) ~~ ES(F_)
-    es <- es_sample(y = as.numeric(p), dat = p_matrix) # ES on counts = N * (ES on props)
-    es_wrong <- es_sample(y = as.numeric(p), dat = p_matrix_wrong)
-    
-    es_correct[i] <- es
-    es_incorrect[i] <- es_wrong
+                           seed = 42,
+                           parallel = TRUE,
+                           n_cores = parallel::detectCores() - 2){
+
+  if(parallel && n_cores > 1) {
+    # Parallel execution
+    results <- parallel::mclapply(1:nsim, function(i) {
+      set.seed(seed + i)  # Unique seed per iteration for reproducibility
+
+      # Generate observation
+      prob_vec <- as.numeric(brms::rdirichlet(1, alpha))
+      C <- rmultinom(n = 1, size = n_counts, prob = prob_vec)
+      p <- C / n_counts
+
+      # Generate multinomial samples
+      samp_multinomial_counts <- do.call(
+        cbind,
+        lapply(thetas, function(theta) rmultinom(n = N_multinomial, size = n_counts, prob = theta))
+      )
+
+      samp_multinomial_counts_wrong <- do.call(
+        cbind,
+        lapply(thetas_wrong, function(theta) rmultinom(n = N_multinomial, size = n_counts, prob = theta))
+      )
+
+      # Convert to proportions
+      p_matrix <- samp_multinomial_counts / n_counts
+      p_matrix_wrong <- samp_multinomial_counts_wrong / n_counts
+
+      # Calculate energy scores
+      es_correct <- scoringRules::es_sample(y = as.numeric(p), dat = p_matrix)
+      es_incorrect <- scoringRules::es_sample(y = as.numeric(p), dat = p_matrix_wrong)
+
+      return(c(es_correct = es_correct, es_incorrect = es_incorrect))
+    }, mc.cores = n_cores, mc.set.seed = FALSE)
+
+    # Convert results to vectors
+    results_matrix <- do.call(rbind, results)
+    es_correct <- results_matrix[, 1]
+    es_incorrect <- results_matrix[, 2]
+
+  } else {
+    # Sequential execution (fallback)
+    set.seed(seed)
+    es_correct <- rep(NA, nsim)
+    es_incorrect <- rep(NA, nsim)
+
+    for(i in 1:nsim){
+      if(i %% 100 == 0){print(paste0("nsim = ", i))}
+
+      prob_vec <- as.numeric(brms::rdirichlet(1, alpha))
+      C <- rmultinom(n = 1, size = n_counts, prob = prob_vec)
+      p <- C / n_counts
+
+      samp_multinomial_counts <- do.call(
+        cbind,
+        lapply(thetas, function(theta) rmultinom(n = N_multinomial, size = n_counts, prob = theta))
+      )
+
+      samp_multinomial_counts_wrong <- do.call(
+        cbind,
+        lapply(thetas_wrong, function(theta) rmultinom(n = N_multinomial, size = n_counts, prob = theta))
+      )
+
+      p_matrix <- samp_multinomial_counts / n_counts
+      p_matrix_wrong <- samp_multinomial_counts_wrong / n_counts
+
+      es_correct[i] <- scoringRules::es_sample(y = as.numeric(p), dat = p_matrix)
+      es_incorrect[i] <- scoringRules::es_sample(y = as.numeric(p), dat = p_matrix_wrong)
+    }
   }
-  
-  paste0("There are ", mean(es_incorrect < es_correct)*100, " percent of wrong alpha forecasts scored better than the true alpha forecast.")
-  
+
   return(list(es_correct = es_correct, es_incorrect = es_incorrect))
 }
 ```
 
-Plotting support.
+### Histogram visualization (legacy):
 
 ```{r}
 plot_sampling_results <- function(result){
@@ -201,264 +181,547 @@ plot_sampling_results <- function(result){
   breaks = 20
   h1 <- hist(result$es_correct, breaks = breaks, col = rgb(0, 0, 1, 0.4), plot=F)
   h2 <- hist(result$es_incorrect, breaks = breaks, col = rgb(1, 0, 0, 0.5), add = TRUE, plot = F)
-  
+
   xlim_combined <- range(h1$breaks, h2$breaks)
   ylim_combined <- c(0, max(h1$counts, h2$counts))
-  
+
   hist(result$es_correct,
        main = paste0("Energy Scores for N = ", n_samp),
        breaks = breaks,
-       col = rgb(0, 0, 1, 0.4), 
+       col = rgb(0, 0, 1, 0.4),
        xlim = xlim_combined,
        ylim = ylim_combined)
-  hist(result$es_incorrect, 
+  hist(result$es_incorrect,
        breaks= breaks,
-       col = rgb(1, 0, 0, 0.5), 
-       add = TRUE, 
+       col = rgb(1, 0, 0, 0.5),
+       add = TRUE,
        xlab = "Energy Score")
-  
+
   legend("topright",
          legend = c("ES Correct", "ES Incorrect"),
          fill = c(rgb(0, 0, 1, 0.4), rgb(1, 0, 0, 0.5)),
          bty = "n")
-  
+
   paste0("There are ", mean(result$es_incorrect < result$es_correct)*100, " percent of wrong alpha forecasts scored better than the true alpha forecast.")
-  
-  hist(result$es_correct - result$es_incorrect, 
+
+  hist(result$es_correct - result$es_incorrect,
        main = "Histogram of Pairwise Differences (nsim of them)",
        col = "dodgerblue",
        xlab = "ES Correct - ES Incorrect")
 }
 ```
 
-## Setting 1
+## Helper Functions
+
+### Convert results to dataframe:
+
+```{r}
+result_to_df <- function(result, n_counts, method = "mn") {
+  data.frame(
+    es_correct = result$es_correct,
+    es_incorrect = result$es_incorrect,
+    es_diff = result$es_correct - result$es_incorrect,
+    n_counts = n_counts,
+    method = method,
+    sim_label = paste0(method, "_n", n_counts)
+  )
+}
+```
+
+### Run simulations across multiple n_counts:
+
+```{r}
+run_simulation_experiment <- function(alpha,
+                                      thetas,
+                                      thetas_wrong,
+                                      n_counts_vec = c(1, 2, 3, 4, 5, 10, 25, 50, 100, 500),
+                                      nsim = 1000,
+                                      base_seed = 42,
+                                      parallel = TRUE,
+                                      n_cores = parallel::detectCores() - 2) {
+
+  results_list <- list()
+
+  for (i in seq_along(n_counts_vec)) {
+    n <- n_counts_vec[i]
+
+    cat("Running simulation for n_counts =", n, "\n")
+
+    # Run non-multinomial sampling
+    result_nonmn <- es_sampling(
+      thetas = thetas,
+      thetas_wrong = thetas_wrong,
+      alpha = alpha,
+      seed = base_seed + i,
+      nsim = nsim,
+      n_counts = n,
+      parallel = parallel,
+      n_cores = n_cores
+    )
+
+    # Run multinomial sampling
+    result_mn <- es_mn_sampling(
+      thetas = thetas,
+      thetas_wrong = thetas_wrong,
+      alpha = alpha,
+      seed = base_seed + 100 + i,
+      nsim = nsim,
+      n_counts = n,
+      parallel = parallel,
+      n_cores = n_cores
+    )
+
+    # Store results with metadata
+    results_list[[paste0("nonmn_", i)]] <- result_to_df(result_nonmn, n, "non-mn")
+    results_list[[paste0("mn_", i)]] <- result_to_df(result_mn, n, "mn")
+  }
+
+  # Combine all results into single dataframe
+  df_combined <- do.call(rbind, results_list)
+  rownames(df_combined) <- NULL
+
+  return(df_combined)
+}
+```
+
+### Save and visualize functions:
+
+```{r}
+# Save dataframe results to disk (organized by alpha subdirectory)
+save_results <- function(df, scenario_name, alpha, results_dir = "../results/data") {
+  # Create alpha-specific subdirectory
+  alpha_str <- paste(alpha, collapse = "_")
+  alpha_dir <- file.path(results_dir, paste0("alpha_", alpha_str))
+
+  if (!dir.exists(alpha_dir)) {
+    dir.create(alpha_dir, recursive = TRUE)
+    cat("Created directory:", alpha_dir, "\n")
+  }
+
+  # Create filename with alpha (no timestamp - overwrites existing)
+  filename <- file.path(alpha_dir, paste0(scenario_name, "_alpha_", alpha_str, ".rds"))
+  saveRDS(df, filename)
+  cat("Results saved to:", filename, "\n")
+  return(filename)
+}
+
+# Save plot to disk (organized by alpha subdirectory)
+save_plot <- function(plot_obj, plot_name, scenario_name, alpha,
+                     results_dir = "../results/plots",
+                     width = 10, height = 6) {
+  # Create alpha-specific subdirectory
+  alpha_str <- paste(alpha, collapse = "_")
+  alpha_dir <- file.path(results_dir, paste0("alpha_", alpha_str))
+
+  if (!dir.exists(alpha_dir)) {
+    dir.create(alpha_dir, recursive = TRUE)
+    cat("Created directory:", alpha_dir, "\n")
+  }
+
+  # Create filename with alpha (no timestamp - overwrites existing)
+  filename <- file.path(alpha_dir, paste0(scenario_name, "_", plot_name, "_alpha_", alpha_str, ".png"))
+  ggsave(filename, plot = plot_obj, width = width, height = height, dpi = 300)
+  cat("Plot saved to:", filename, "\n")
+  return(filename)
+}
+
+# Save base R graphics plot (for ternary plots)
+save_ternary_plot <- function(plot_func, scenario_name, alpha, alpha_wrong,
+                              n_samp = 100,
+                              results_dir = "../results/plots",
+                              width = 800, height = 800) {
+  # Create alpha-specific subdirectory
+  alpha_str <- paste(alpha, collapse = "_")
+  alpha_dir <- file.path(results_dir, paste0("alpha_", alpha_str))
+
+  if (!dir.exists(alpha_dir)) {
+    dir.create(alpha_dir, recursive = TRUE)
+    cat("Created directory:", alpha_dir, "\n")
+  }
+
+  # Create filename with alpha (no timestamp - overwrites existing)
+  filename <- file.path(alpha_dir, paste0(scenario_name, "_ternary_alpha_", alpha_str, ".png"))
+
+  # Save using base R graphics
+  png(filename, width = width, height = height, res = 150)
+  plot_func(alpha, alpha_wrong, n_samp)
+  dev.off()
+
+  cat("Ternary plot saved to:", filename, "\n")
+  return(filename)
+}
+
+# Visualize alpha distributions on ternary plot
+plot_alpha_ternary <- function(alpha, alpha_wrong, n_samp = 100) {
+  # Generate samples
+  thetas <- lapply(FUN = draw_one_dirichlet, X = rep(1, n_samp), alpha = alpha)
+  thetas_wrong <- lapply(FUN = draw_one_dirichlet, X = rep(1, n_samp), alpha = alpha_wrong)
+
+  # Calculate mean and mode
+  theta_true <- alpha / sum(alpha)
+  theta_mode <- (alpha - 1) / (sum(alpha) - length(alpha))
+
+  par(mar = c(0.3, 0.3, 1.3, 0.3))
+
+  # Plot true alpha distribution
+  TernaryPlot(alab = "Variant A prevalence \u2192",
+              blab = "\u2190 Variant B prevalence",
+              clab = "Variant C prevalence \u2192",
+              main = paste0("True: Dir(", paste(alpha, collapse = ", "), ") vs Wrong: Dir(", paste(alpha_wrong, collapse = ", "), ")"),
+              region = Ternary:::ternRegionDefault / 100,
+              point = "right", lab.cex = 0.8, grid.minor.lines = 0,
+              grid.lty = "solid", col = rgb(0.9, 0.9, 0.9), grid.col = "white",
+              axis.col = rgb(0.6, 0.6, 0.6), ticks.col = rgb(0.6, 0.6, 0.6),
+              axis.rotate = FALSE,
+              padding = 0.08)
+
+  # Color by true alpha density
+  cols <- TernaryPointValues(Func = dd_func, alpha = alpha)
+  ColourTernary(cols, spectrum = rev(hcl.colors(10, palette = "viridis", alpha = 0.6)))
+
+  # Add points
+  AddToTernary(graphics::points, thetas, pch = 20, cex = 0.6, col = rgb(0, 0, 1, 0.3))
+  AddToTernary(graphics::points, thetas_wrong, pch = 20, cex = 0.6, col = rgb(1, 0, 0, 0.3))
+  AddToTernary(graphics::points, theta_true, pch = 21, cex = 1.0, col = "blue", bg = "lightblue", lwd = 2)
+
+  # Add legend
+  legend("topright",
+         legend = c("True alpha samples", "Wrong alpha samples", "True mean"),
+         pch = c(20, 20, 21),
+         col = c(rgb(0, 0, 1, 0.5), rgb(1, 0, 0, 0.5), "blue"),
+         pt.bg = c(NA, NA, "lightblue"),
+         pt.cex = c(1, 1, 1.5),
+         bty = "n")
+}
+
+# Generate all plots for a simulation result
+generate_all_plots <- function(df_results) {
+  plots <- list()
+
+  # Plot 1: Faceted boxplots comparing correct vs incorrect
+  df_long <- df_results %>%
+    pivot_longer(
+      cols = c(es_correct, es_incorrect),
+      names_to = "forecast_type",
+      values_to = "energy_score"
+    )
+
+  plots$comparison <- ggplot(df_long, aes(x = factor(n_counts), y = energy_score, fill = forecast_type)) +
+    geom_boxplot() +
+    facet_wrap(~ method, labeller = labeller(method = c("mn" = "Multinomial Sampling",
+                                                          "non-mn" = "No Multinomial Sampling"))) +
+    labs(
+      title = "Energy Scores Comparison by Method and Sample Size",
+      x = "n_counts (number of sequences)",
+      y = "Energy Score",
+      fill = "Forecast Type"
+    ) +
+    scale_fill_manual(
+      values = c(es_correct = rgb(0, 0, 1, 0.4),
+                 es_incorrect = rgb(1, 0, 0, 0.5)),
+      labels = c("Correct (true alpha)", "Incorrect (wrong alpha)")
+    ) +
+    theme_bw() +
+    theme(legend.position = "bottom")
+
+  # Plot 2: Side-by-side comparison by method
+  plots$differences_method <- ggplot(df_results, aes(x = factor(n_counts), y = es_diff, fill = method)) +
+    geom_boxplot() +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "red", alpha = 0.5) +
+    labs(
+      title = "Energy Score Differences by Method and Sample Size",
+      subtitle = "Comparing multinomial vs non-multinomial sampling",
+      x = "n_counts (number of sequences)",
+      y = "ES Difference (Correct - Incorrect)",
+      fill = "Method"
+    ) +
+    scale_fill_manual(
+      values = c("mn" = "steelblue", "non-mn" = "coral"),
+      labels = c("Multinomial Sampling", "No Multinomial Sampling")
+    ) +
+    theme_bw() +
+    theme(legend.position = "bottom")
+
+  # Plot 3: Dotplot version of comparison (shows discreteness better)
+  plots$comparison_dotplot <- ggplot(df_long, aes(x = factor(n_counts), y = energy_score, color = forecast_type)) +
+    geom_point(alpha = 0.3, size = 0.8, position = position_jitterdodge(jitter.width = 0.15, dodge.width = 0.6)) +
+    facet_wrap(~ method, labeller = labeller(method = c("mn" = "Multinomial Sampling",
+                                                          "non-mn" = "No Multinomial Sampling"))) +
+    labs(
+      title = "Energy Scores Comparison by Method and Sample Size (Dotplot)",
+      subtitle = "Each dot represents one simulation run - reveals discreteness at small n_counts",
+      x = "n_counts (number of sequences)",
+      y = "Energy Score",
+      color = "Forecast Type"
+    ) +
+    scale_color_manual(
+      values = c(es_correct = "blue", es_incorrect = "red"),
+      labels = c("Correct (true alpha)", "Incorrect (wrong alpha)")
+    ) +
+    theme_bw() +
+    theme(legend.position = "bottom")
+
+  # Plot 4: Dotplot version of differences by method (shows discreteness better)
+  plots$differences_method_dotplot <- ggplot(df_results, aes(x = factor(n_counts), y = es_diff, color = method)) +
+    geom_point(alpha = 0.3, size = 0.8, position = position_jitterdodge(jitter.width = 0.15, dodge.width = 0.6)) +
+    geom_hline(yintercept = 0, linetype = "dashed", color = "black", alpha = 0.5) +
+    labs(
+      title = "Energy Score Differences by Method and Sample Size (Dotplot)",
+      subtitle = "Each dot represents one simulation run - reveals discreteness at small n_counts",
+      x = "n_counts (number of sequences)",
+      y = "ES Difference (Correct - Incorrect)",
+      color = "Method"
+    ) +
+    scale_color_manual(
+      values = c("mn" = "steelblue", "non-mn" = "coral"),
+      labels = c("Multinomial Sampling", "No Multinomial Sampling")
+    ) +
+    theme_bw() +
+    theme(legend.position = "bottom")
+
+  return(plots)
+}
+
+# Run complete simulation scenario and save everything
+run_and_save_scenario <- function(scenario_name,
+                                  alpha,
+                                  alpha_wrong,
+                                  n_samp = 100,
+                                  n_counts_vec = c(1, 2, 3, 4, 5, 10, 25, 50, 100, 500),
+                                  nsim = 1000,
+                                  base_seed = 42,
+                                  save_results_flag = TRUE,
+                                  parallel = TRUE,
+                                  n_cores = parallel::detectCores() - 2) {
+
+  cat("\n========================================\n")
+  cat("Running scenario:", scenario_name, "\n")
+  cat("Alpha (true):", paste(alpha, collapse = ", "), "\n")
+  cat("Alpha (wrong):", paste(alpha_wrong, collapse = ", "), "\n")
+  cat("Parallel processing:", parallel, "with", n_cores, "cores\n")
+  cat("========================================\n\n")
+
+  # Pre-allocate forecast distributions
+  thetas <- lapply(FUN = draw_one_dirichlet, X = rep(1, n_samp), alpha = alpha)
+  thetas_wrong <- lapply(FUN = draw_one_dirichlet, X = rep(1, n_samp), alpha = alpha_wrong)
+
+  # Run simulations
+  df_results <- run_simulation_experiment(
+    alpha = alpha,
+    thetas = thetas,
+    thetas_wrong = thetas_wrong,
+    n_counts_vec = n_counts_vec,
+    nsim = nsim,
+    base_seed = base_seed,
+    parallel = parallel,
+    n_cores = n_cores
+  )
+
+  # Add scenario metadata
+  df_results$scenario <- scenario_name
+  df_results$alpha_true <- paste(alpha, collapse = "_")
+  df_results$alpha_wrong <- paste(alpha_wrong, collapse = "_")
+
+  # Generate plots
+  plots <- generate_all_plots(df_results)
+
+  # Save if requested
+  if (save_results_flag) {
+    save_results(df_results, scenario_name, alpha)
+    save_plot(plots$comparison, "comparison", scenario_name, alpha)
+    save_plot(plots$differences_method, "differences_method", scenario_name, alpha)
+    save_plot(plots$comparison_dotplot, "comparison_dotplot", scenario_name, alpha)
+    save_plot(plots$differences_method_dotplot, "differences_method_dotplot", scenario_name, alpha)
+    save_ternary_plot(plot_alpha_ternary, scenario_name, alpha, alpha_wrong, n_samp = n_samp)
+  }
+
+  # Calculate summary statistics
+  summary_stats <- df_results %>%
+    group_by(method, n_counts) %>%
+    summarise(
+      pct_incorrect_better = mean(es_diff < 0) * 100,
+      mean_diff = mean(es_diff),
+      median_diff = median(es_diff),
+      .groups = "drop"
+    )
+
+  cat("\n========================================\n")
+  cat("Summary Statistics:\n")
+  print(summary_stats)
+  cat("========================================\n\n")
+
+  return(list(
+    results = df_results,
+    plots = plots,
+    summary = summary_stats
+  ))
+}
+```
+
+## Simulation Scenarios
 
 Fixed parameters:
 
 -   100 submitted samples (theta's)
 -   100 multinomial samples
--   1000 simulations where observed C (and so p) change each time form Dir(alpha).
--   Forecasts Run: True alpha = c(2,4,4)
-    -   (very incorrect), wrong alpha = c(10,1,1)
-    -   (less incorrect), wrong alpha = c(10,10,10)
-    -   (incorrect), wrong alpha = c(20,5,5)
+-   1000 simulations where observed C (and so p) change each time from Dir(alpha)
+-   `n_counts` = the number of counts/sequences available: 1, 2, 3, 4, 5, 10, 25, 50, 100, 500
+-   Parallel processing enabled using 12 cores (n_cores = detectCores() - 2)
 
-Varying Parameters:
+### Scenario 1: Moderately Incorrect Forecast
 
--   `n_counts` = the number of counts/sequences available on the given day/location.
-    -   5, 25, 50, 100, 500
+True alpha = c(2, 3, 15), Wrong alpha = c(15, 3, 2)
 
-Non-Multinomial Sampling Results
+Visualize the distributions:
 
 ```{r}
-result_notmn1 <- es_sampling(thetas = thetas, 
-                         thetas_wrong = thetas_wrong, 
-                         alpha = alpha, seed = 52, nsim = 1000, n_counts = 5)
-plot_sampling_results(result_notmn1)
-paste0("There are ", mean(result_notmn1$es_incorrect < result_notmn1$es_correct)*100, " percent of wrong alpha forecasts scored better than the true alpha forecast.")
+plot_alpha_ternary(alpha = c(2, 3, 15), alpha_wrong = c(15, 3, 2))
 ```
 
+Run simulation:
+
 ```{r}
-result_notmn2 <- es_sampling(thetas = thetas, 
-                         thetas_wrong = thetas_wrong, 
-                         alpha = alpha, seed = 53, nsim = 1000, n_counts = 25)
-plot_sampling_results(result_notmn2)
-paste0("There are ", mean(result_notmn2$es_incorrect < result_notmn2$es_correct)*100, " percent of wrong alpha forecasts scored better than the true alpha forecast.")
+scenario1 <- run_and_save_scenario(
+  scenario_name = "scenario1_misspecified",
+  alpha = c(2, 3, 15),
+  alpha_wrong = c(15, 3, 2),
+  n_samp = 100,
+  nsim = 1000,
+  base_seed = 42,
+  save_results_flag = TRUE
+)
+
+# Display plots
+scenario1$plots$comparison
+scenario1$plots$differences_method
 ```
 
+### Scenario 2: Very Sharp (Narrow) Forecast
+
+True alpha = c(2, 3, 15), Wrong alpha = c(200, 300, 1500)
+
+Visualize the distributions:
+
 ```{r}
-result_notmn3 <- es_sampling(thetas = thetas, 
-                         thetas_wrong = thetas_wrong, 
-                         alpha = alpha, seed = 54, nsim = 1000, n_counts = 50)
-plot_sampling_results(result_notmn3)
-paste0("There are ", mean(result_notmn3$es_incorrect < result_notmn3$es_correct)*100, " percent of wrong alpha forecasts scored better than the true alpha forecast.")
+plot_alpha_ternary(alpha = c(2, 3, 15), alpha_wrong = c(200, 300, 1500))
 ```
 
+Run simulation:
+
 ```{r}
-result_notmn4 <- es_sampling(thetas = thetas, 
-                         thetas_wrong = thetas_wrong, 
-                         alpha = alpha, seed = 55, nsim = 1000, n_counts = 100)
-plot_sampling_results(result_notmn4)
-paste0("There are ", mean(result_notmn4$es_incorrect < result_notmn4$es_correct)*100, " percent of wrong alpha forecasts scored better than the true alpha forecast.")
+scenario2 <- run_and_save_scenario(
+  scenario_name = "scenario2_narrow_calibrated",
+  alpha = c(2, 3, 15),
+  alpha_wrong = c(200, 300, 1500),
+  n_samp = 100,
+  nsim = 1000,
+  base_seed = 52,
+  save_results_flag = TRUE
+)
+
+# Display key plot
+scenario2$plots$differences_method
 ```
 
+### Scenario 3: Very Incorrect Dispersed
+
+True alpha = c(2, 3, 15), Wrong alpha = 1/5 \* alpha
+
+Visualize the distributions:
+
 ```{r}
-result_notmn5 <- es_sampling(thetas = thetas, 
-                         thetas_wrong = thetas_wrong, 
-                         alpha = alpha, seed = 56, nsim = 1000, n_counts = 500)
-plot_sampling_results(result_notmn5)
-paste0("There are ", mean(result_notmn4$es_incorrect < result_notmn4$es_correct)*100, " percent of wrong alpha forecasts scored better than the true alpha forecast.")
+plot_alpha_ternary(alpha = c(2, 3, 15), alpha_wrong = c(2, 3, 15)/5)
 ```
 
-Multinomial Sampling Results
+Run simulation:
 
 ```{r}
-result_mn1 <- es_mn_sampling(thetas = thetas, 
-                         thetas_wrong = thetas_wrong, 
-                         alpha = alpha, seed = 42, nsim = 1000, n_counts = 5)
-plot_sampling_results(result_mn1)
-paste0("There are ", mean(result_mn1$es_incorrect < result_mn1$es_correct)*100, " percent of wrong alpha forecasts scored better than the true alpha forecast.")
+scenario3 <- run_and_save_scenario(
+  scenario_name = "scenario3_dispersed_calibrated",
+  alpha = c(2, 3, 15),
+  alpha_wrong = c(2, 3, 15)/5,
+  n_samp = 100,
+  nsim = 1000,
+  base_seed = 62,
+  save_results_flag = TRUE
+)
+
+# Display key plot
+scenario3$plots$differences_method
 ```
 
+### Scenario 4: Less Misspecified
+
+True alpha = c(2, 4, 4), Wrong alpha = c(4,5,11)
+
+Visualize the distributions:
+
 ```{r}
-result_mn2 <- es_mn_sampling(thetas = thetas, 
-                         thetas_wrong = thetas_wrong, 
-                         alpha = alpha, seed = 43, nsim = 1000, n_counts = 25)
-plot_sampling_results(result_mn2)
-paste0("There are ", mean(result_mn2$es_incorrect < result_mn2$es_correct)*100, " percent of wrong alpha forecasts scored better than the true alpha forecast.")
+plot_alpha_ternary(alpha = c(2, 3, 15), alpha_wrong = c(4,5,11))
 ```
 
+Run simulation:
+
 ```{r}
-result_mn3 <- es_mn_sampling(thetas = thetas, 
-                         thetas_wrong = thetas_wrong, 
-                         alpha = alpha, seed = 44, nsim = 1000, n_counts = 50)
-plot_sampling_results(result_mn3)
-paste0("There are ", mean(result_mn3$es_incorrect < result_mn3$es_correct)*100, " percent of wrong alpha forecasts scored better than the true alpha forecast.")
+scenario4 <- run_and_save_scenario(
+  scenario_name = "scenario4_less_misspecified",
+  alpha = c(2, 3, 15),
+  alpha_wrong = c(4, 5, 11),
+  n_samp = 100,
+  nsim = 1000,
+  base_seed = 72,
+  save_results_flag = TRUE
+)
+
+# Display key plot
+scenario4$plots$differences_method
 ```
 
-```{r}
-result_mn4 <- es_mn_sampling(thetas = thetas, 
-                         thetas_wrong = thetas_wrong, 
-                         alpha = alpha, seed = 45, nsim = 1000, n_counts = 100)
-plot_sampling_results(result_mn4)
-paste0("There are ", mean(result_mn4$es_incorrect < result_mn4$es_correct)*100, " percent of wrong alpha forecasts scored better than the true alpha forecast.")
-```
+## Cross-Scenario Comparison
+
+Compare all five scenarios side-by-side:
 
 ```{r}
-result_mn5 <- es_mn_sampling(thetas = thetas, 
-                         thetas_wrong = thetas_wrong, 
-                         alpha = alpha, seed = 46, nsim = 1000, n_counts = 500)
-plot_sampling_results(result_mn5)
-paste0("There are ", mean(result_mn5$es_incorrect < result_mn5$es_correct)*100, " percent of wrong alpha forecasts scored better than the true alpha forecast.")
-```
+# Combine all scenario results
+all_scenarios <- rbind(
+  scenario1$results,
+  scenario2$results,
+  scenario3$results,
+  scenario4$results
+)
 
-```{r}
-library(tidyr)
-
-df_mn1 <- data.frame(es_correct = result_mn1$es_correct,
-           es_incorrect = result_mn1$es_incorrect,
-           sim = "mn1")
-
-df_mn2 <- data.frame(es_correct = result_mn2$es_correct,
-           es_incorrect = result_mn2$es_incorrect,
-           sim = "mn2")
-
-df_mn3 <- data.frame(es_correct = result_mn3$es_correct,
-           es_incorrect = result_mn3$es_incorrect,
-           sim = "mn3")
-
-df_mn4 <- data.frame(es_correct = result_mn4$es_correct,
-           es_incorrect = result_mn4$es_incorrect,
-           sim = "mn4")
-
-df_mn5 <- data.frame(es_correct = result_mn5$es_correct,
-           es_incorrect = result_mn5$es_incorrect,
-           sim = "mn5")
-
-df_nonmn1 <- data.frame(es_correct = result_notmn1$es_correct,
-           es_incorrect = result_notmn1$es_incorrect,
-           sim = "non-mn1")
-
-df_nonmn2 <- data.frame(es_correct = result_notmn2$es_correct,
-           es_incorrect = result_notmn2$es_incorrect,
-           sim = "non-mn2")
-
-df_nonmn3 <- data.frame(es_correct = result_notmn3$es_correct,
-           es_incorrect = result_notmn3$es_incorrect,
-           sim = "non-mn3")
-
-df_nonmn4 <- data.frame(es_correct = result_notmn4$es_correct,
-           es_incorrect = result_notmn4$es_incorrect,
-           sim = "non-mn4")
-
-df_nonmn5 <- data.frame(es_correct = result_notmn5$es_correct,
-           es_incorrect = result_notmn5$es_incorrect,
-           sim = "non-mn5")
-
-df_combo <- df_combo <- rbind(
-                              df_nonmn1,
-                              df_nonmn2,
-                              df_nonmn3,
-                              df_nonmn4,
-                              df_nonmn5,
-                              df_mn1, 
-                              df_mn2,
-                              df_mn3,
-                              df_mn4,
-                              df_mn5)
-
-# Reshape data to long format
-df_long <- df_combo %>%
-    pivot_longer(
-        cols = c(es_correct, es_incorrect),
-        names_to = "es",
-        values_to = "value"
-    )
-
-ggplot(data = df_long, aes(x = sim, y = value, fill = es)) +
+# Plot comparison
+ggplot(all_scenarios, aes(x = factor(n_counts), y = es_diff, fill = scenario)) +
   geom_boxplot() +
-  theme_bw()
-
-# ggplot(data = df_long, aes(x = es, y = value, fill = es)) + 
-#   facet_wrap(~sim) + 
-#   geom_boxplot() + 
-#   theme_bw()
+  facet_wrap(~ method) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red", alpha = 0.5) +
+  labs(
+    title = "Comparison Across All Scenarios",
+    x = "n_counts",
+    y = "ES Difference (Correct - Incorrect)",
+    fill = "Scenario"
+  ) +
+  theme_bw() +
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 45, hjust = 1))
 ```
 
-```{r}
+## Loading Saved Results
 
-df_mn1 <- data.frame(es_diff = result_mn1$es_correct - result_mn1$es_incorrect,
-           sim = "mn1")
+Load and analyze previously saved simulation results:
 
-df_mn2 <- data.frame(es_diff = result_mn2$es_correct - result_mn2$es_incorrect,
-           sim = "mn2")
+```{r eval=FALSE}
+# List available alpha directories
+# list.dirs("../results/data", recursive = FALSE)
 
-df_mn3 <- data.frame(es_diff = result_mn3$es_correct - result_mn3$es_incorrect,
-           sim = "mn3")
+# List files for a specific alpha value
+# list.files("../results/data/alpha_2_4_4", pattern = "*.rds")
 
-df_mn4 <- data.frame(es_diff = result_mn4$es_correct - result_mn4$es_incorrect,
-           sim = "mn4")
+# Load a specific result (files overwrite, so no timestamp needed)
+# loaded_results <- readRDS("../results/data/alpha_2_4_4/scenario1_moderate_wrong_alpha_2_4_4.rds")
 
-df_mn5 <- data.frame(es_diff = result_mn5$es_correct - result_mn5$es_incorrect,
-           sim = "mn5")
-
-df_nonmn1 <- data.frame(es_diff = result_notmn1$es_correct - result_notmn1$es_incorrect,
-           sim = "non-mn1")
-
-df_nonmn2 <- data.frame(es_diff = result_notmn2$es_correct - result_notmn2$es_incorrect,
-           sim = "non-mn2")
-
-df_nonmn3 <- data.frame(es_diff = result_notmn3$es_correct - result_notmn3$es_incorrect,
-           sim = "non-mn3")
-
-df_nonmn4 <- data.frame(es_diff = result_notmn4$es_correct - result_notmn4$es_incorrect,
-           sim = "non-mn4")
-
-df_nonmn5 <- data.frame(es_diff = result_notmn5$es_correct - result_notmn5$es_incorrect,
-           sim = "non-mn5")
-
-df_combo <- df_combo <- rbind(
-                              df_nonmn1,
-                              df_mn1,
-                              df_nonmn2,
-                              df_mn2,
-                              df_nonmn3,
-                              df_mn3,
-                              df_nonmn4,
-                              df_mn4,
-                              df_nonmn5,
-                              df_mn5)
-
-# Reshape data to long format
-# df_long <- df_combo %>%
-#     pivot_longer( 
-#         cols = c(es_correct, es_incorrect),
-#         names_to = "es",
-#         values_to = "value"
-#     )
-
-
-ggplot(data = df_combo, aes(x = sim, y = es_diff)) +
-  geom_boxplot() +
-  theme_bw()
+# You can then regenerate plots from loaded results
+# plots <- generate_all_plots(loaded_results)
+# plots$comparison
+# plots$differences_method
 ```
