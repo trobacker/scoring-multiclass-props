@@ -166,7 +166,7 @@ run_simulation_experiment <- function(alpha, thetas, thetas_wrong,
   return(df_combined)
 }
 
-save_results <- function(df, scenario_name, alpha, results_dir = "../results/data") {
+save_results <- function(df, scenario_name, alpha, results_dir = "./results/data") {
   alpha_str <- paste(alpha, collapse = "_")
   alpha_dir <- file.path(results_dir, paste0("alpha_", alpha_str))
   if (!dir.exists(alpha_dir)) {
@@ -180,7 +180,7 @@ save_results <- function(df, scenario_name, alpha, results_dir = "../results/dat
 
 # Save plot to disk (organized by alpha subdirectory)
 save_plot <- function(plot_obj, plot_name, scenario_name, alpha,
-                     results_dir = "../results/plots",
+                     results_dir = "./results/plots",
                      width = 10, height = 6) {
   alpha_str <- paste(alpha, collapse = "_")
   alpha_dir <- file.path(results_dir, paste0("alpha_", alpha_str))
@@ -329,7 +329,7 @@ plot_alpha_ternary <- function(alpha, alpha_wrong, n_samp = 100) {
 # Save base R graphics plot (for ternary plots)
 save_ternary_plot <- function(plot_func, scenario_name, alpha, alpha_wrong,
                               n_samp = 100,
-                              results_dir = "../results/plots",
+                              results_dir = "./results/plots",
                               width = 800, height = 800) {
   # Create alpha-specific subdirectory
   alpha_str <- paste(alpha, collapse = "_")
@@ -475,7 +475,7 @@ cat("=========================================\n")
 combined_results <- do.call(rbind, all_results)
 
 # Save combined results
-combined_file <- "../results/all_scenarios_combined.rds"
+combined_file <- "./results/all_scenarios_combined.rds"
 saveRDS(combined_results, combined_file)
 cat("Combined results saved to:", combined_file, "\n")
 

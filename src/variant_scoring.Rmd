@@ -782,8 +782,6 @@ hist(es_correct - es_incorrect, col = rgb(0, 1, 0, 0.5))
 ```
 
 ```{r}
-
-
 ## WITH multinomial sampling
 # Reproducibility
 set.seed(1234)
