@@ -240,34 +240,36 @@ generate_all_plots <- function(df_results) {
   plots <- list()
 
   # Plot 1: Faceted boxplots comparing correct vs incorrect (random observations)
-  df_long <- df_results %>%
-    pivot_longer(
-      cols = c(es_correct, es_incorrect),
-      names_to = "forecast_type",
-      values_to = "energy_score"
-    )
-
-  plots$comparison <- ggplot(df_long, aes(x = factor(n_counts), y = energy_score, fill = forecast_type)) +
-    geom_boxplot() +
-    facet_wrap(~ method, labeller = labeller(method = c("mn" = "Multinomial Sampling",
-                                                          "non-mn" = "No Multinomial Sampling"))) +
-    labs(
-      title = "Energy Scores Comparison by Method and Sample Size",
-      subtitle = "Observations drawn from Dir(alpha)",
-      x = "n_counts (number of sequences)",
-      y = "Energy Score",
-      fill = "Forecast Type"
-    ) +
-    scale_fill_manual(
-      values = c(es_correct = rgb(0, 0, 1, 0.4),
-                 es_incorrect = rgb(1, 0, 0, 0.5)),
-      labels = c("Correct (samples from true alpha)",
-                 "Incorrect (samples from wrong alpha)")
-    ) +
-    theme_bw() +
-    theme(legend.position = "bottom")
+  # COMMENTED OUT - Dotplots are preferred for visualization
+  # df_long <- df_results %>%
+  #   pivot_longer(
+  #     cols = c(es_correct, es_incorrect),
+  #     names_to = "forecast_type",
+  #     values_to = "energy_score"
+  #   )
+  #
+  # plots$comparison <- ggplot(df_long, aes(x = factor(n_counts), y = energy_score, fill = forecast_type)) +
+  #   geom_boxplot() +
+  #   facet_wrap(~ method, labeller = labeller(method = c("mn" = "Multinomial Sampling",
+  #                                                         "non-mn" = "No Multinomial Sampling"))) +
+  #   labs(
+  #     title = "Energy Scores Comparison by Method and Sample Size",
+  #     subtitle = "Observations drawn from Dir(alpha)",
+  #     x = "n_counts (number of sequences)",
+  #     y = "Energy Score",
+  #     fill = "Forecast Type"
+  #   ) +
+  #   scale_fill_manual(
+  #     values = c(es_correct = rgb(0, 0, 1, 0.4),
+  #                es_incorrect = rgb(1, 0, 0, 0.5)),
+  #     labels = c("Correct (samples from true alpha)",
+  #                "Incorrect (samples from wrong alpha)")
+  #   ) +
+  #   theme_bw() +
+  #   theme(legend.position = "bottom")
 
   # Plot 1b: Scores when observation is true mean
+  # COMMENTED OUT - Dotplots are preferred for visualization
   df_long_true_mean <- df_results %>%
     pivot_longer(
       cols = c(es_correct_vs_true_mean, es_incorrect_vs_true_mean),
@@ -275,43 +277,52 @@ generate_all_plots <- function(df_results) {
       values_to = "energy_score"
     )
 
-  plots$comparison_true_mean_obs <- ggplot(df_long_true_mean, aes(x = factor(n_counts), y = energy_score, fill = forecast_type)) +
-    geom_boxplot() +
-    facet_wrap(~ method, labeller = labeller(method = c("mn" = "Multinomial Sampling",
-                                                          "non-mn" = "No Multinomial Sampling"))) +
-    labs(
-      title = "Energy Scores When Observation = True Mean",
-      subtitle = "Observation is alpha/sum(alpha) (deterministic)",
-      x = "n_counts (number of sequences)",
-      y = "Energy Score",
-      fill = "Forecast Type"
-    ) +
-    scale_fill_manual(
-      values = c(es_correct_vs_true_mean = rgb(0, 0, 1, 0.4),
-                 es_incorrect_vs_true_mean = rgb(1, 0, 0, 0.5)),
-      labels = c("Correct forecast vs true mean",
-                 "Incorrect forecast vs true mean")
-    ) +
-    theme_bw() +
-    theme(legend.position = "bottom")
+  # plots$comparison_true_mean_obs <- ggplot(df_long_true_mean, aes(x = factor(n_counts), y = energy_score, fill = forecast_type)) +
+  #   geom_boxplot() +
+  #   facet_wrap(~ method, labeller = labeller(method = c("mn" = "Multinomial Sampling",
+  #                                                         "non-mn" = "No Multinomial Sampling"))) +
+  #   labs(
+  #     title = "Energy Scores When Observation = True Mean",
+  #     subtitle = "Observation is alpha/sum(alpha) (deterministic)",
+  #     x = "n_counts (number of sequences)",
+  #     y = "Energy Score",
+  #     fill = "Forecast Type"
+  #   ) +
+  #   scale_fill_manual(
+  #     values = c(es_correct_vs_true_mean = rgb(0, 0, 1, 0.4),
+  #                es_incorrect_vs_true_mean = rgb(1, 0, 0, 0.5)),
+  #     labels = c("Correct forecast vs true mean",
+  #                "Incorrect forecast vs true mean")
+  #   ) +
+  #   theme_bw() +
+  #   theme(legend.position = "bottom")
 
   # Plot 2: Side-by-side comparison by method
-  plots$differences_method <- ggplot(df_results, aes(x = factor(n_counts), y = es_diff, fill = method)) +
-    geom_boxplot() +
-    geom_hline(yintercept = 0, linetype = "dashed", color = "red", alpha = 0.5) +
-    labs(
-      title = "Energy Score Differences by Method and Sample Size",
-      subtitle = "Comparing multinomial vs non-multinomial sampling",
-      x = "n_counts (number of sequences)",
-      y = "ES Difference (Correct - Incorrect)",
-      fill = "Method"
-    ) +
-    scale_fill_manual(
-      values = c("mn" = "steelblue", "non-mn" = "coral"),
-      labels = c("Multinomial Sampling", "No Multinomial Sampling")
-    ) +
-    theme_bw() +
-    theme(legend.position = "bottom")
+  # COMMENTED OUT - Dotplots are preferred for visualization
+  # plots$differences_method <- ggplot(df_results, aes(x = factor(n_counts), y = es_diff, fill = method)) +
+  #   geom_boxplot() +
+  #   geom_hline(yintercept = 0, linetype = "dashed", color = "red", alpha = 0.5) +
+  #   labs(
+  #     title = "Energy Score Differences by Method and Sample Size",
+  #     subtitle = "Comparing multinomial vs non-multinomial sampling",
+  #     x = "n_counts (number of sequences)",
+  #     y = "ES Difference (Correct - Incorrect)",
+  #     fill = "Method"
+  #   ) +
+  #   scale_fill_manual(
+  #     values = c("mn" = "steelblue", "non-mn" = "coral"),
+  #     labels = c("Multinomial Sampling", "No Multinomial Sampling")
+  #   ) +
+  #   theme_bw() +
+  #   theme(legend.position = "bottom")
+
+  # Prepare data for dotplots
+  df_long <- df_results %>%
+    pivot_longer(
+      cols = c(es_correct, es_incorrect),
+      names_to = "forecast_type",
+      values_to = "energy_score"
+    )
 
   # Plot 3: Dotplot version of comparison (shows discreteness better)
   plots$comparison_dotplot <- ggplot(df_long, aes(x = factor(n_counts), y = energy_score, color = forecast_type)) +
@@ -527,9 +538,10 @@ run_scenario <- function(scenario_config, n_samp = 100,
   save_results(df_results, scenario_config$name, scenario_config$alpha)
 
   # Save plots
-  save_plot(plots$comparison, "comparison", scenario_config$name, scenario_config$alpha)
-  save_plot(plots$comparison_true_mean_obs, "comparison_true_mean_obs", scenario_config$name, scenario_config$alpha)
-  save_plot(plots$differences_method, "differences_method", scenario_config$name, scenario_config$alpha)
+  # COMMENTED OUT - Boxplots not needed, dotplots are preferred
+  # save_plot(plots$comparison, "comparison", scenario_config$name, scenario_config$alpha)
+  # save_plot(plots$comparison_true_mean_obs, "comparison_true_mean_obs", scenario_config$name, scenario_config$alpha)
+  # save_plot(plots$differences_method, "differences_method", scenario_config$name, scenario_config$alpha)
   save_plot(plots$comparison_dotplot, "comparison_dotplot", scenario_config$name, scenario_config$alpha)
   save_plot(plots$comparison_true_mean_obs_dotplot, "comparison_true_mean_obs_dotplot", scenario_config$name, scenario_config$alpha)
   save_plot(plots$differences_method_dotplot, "differences_method_dotplot", scenario_config$name, scenario_config$alpha)
