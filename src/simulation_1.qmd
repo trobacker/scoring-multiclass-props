@@ -40,8 +40,12 @@ es_sampling <- function(alpha = c(2,4,4),
                            n_cores = parallel::detectCores() - 2){
 
   # Pre-compute matrices once (more efficient)
-  p_matrix <- matrix(unlist(thetas), nrow = 3, byrow = FALSE)
-  p_matrix_wrong <- matrix(unlist(thetas_wrong), nrow = 3, byrow = FALSE)
+  K <- length(alpha)
+  p_matrix <- matrix(unlist(thetas), nrow = K, byrow = FALSE)
+  p_matrix_wrong <- matrix(unlist(thetas_wrong), nrow = K, byrow = FALSE)
+
+  # True mean of Dirichlet(alpha) is alpha/sum(alpha)
+  true_mean <- alpha / sum(alpha)
 
   if(parallel && n_cores > 1) {
     # Parallel execution
@@ -56,20 +60,29 @@ es_sampling <- function(alpha = c(2,4,4),
       # Calculate energy scores
       es_correct <- scoringRules::es_sample(y = as.numeric(p), dat = p_matrix)
       es_incorrect <- scoringRules::es_sample(y = as.numeric(p), dat = p_matrix_wrong)
+      # Score forecasts against true mean as observation
+      es_correct_vs_true_mean <- scoringRules::es_sample(y = true_mean, dat = p_matrix)
+      es_incorrect_vs_true_mean <- scoringRules::es_sample(y = true_mean, dat = p_matrix_wrong)
 
-      return(c(es_correct = es_correct, es_incorrect = es_incorrect))
+      return(c(es_correct = es_correct, es_incorrect = es_incorrect,
+               es_correct_vs_true_mean = es_correct_vs_true_mean,
+               es_incorrect_vs_true_mean = es_incorrect_vs_true_mean))
     }, mc.cores = n_cores, mc.set.seed = FALSE)
 
     # Convert results to vectors
     results_matrix <- do.call(rbind, results)
     es_correct <- results_matrix[, 1]
     es_incorrect <- results_matrix[, 2]
+    es_correct_vs_true_mean <- results_matrix[, 3]
+    es_incorrect_vs_true_mean <- results_matrix[, 4]
 
   } else {
     # Sequential execution (fallback)
     set.seed(seed)
     es_correct <- rep(NA, nsim)
     es_incorrect <- rep(NA, nsim)
+    es_correct_vs_true_mean <- rep(NA, nsim)
+    es_incorrect_vs_true_mean <- rep(NA, nsim)
 
     for(i in 1:nsim){
       if(i %% 100 == 0){print(paste0("nsim = ", i))}
@@ -80,10 +93,15 @@ es_sampling <- function(alpha = c(2,4,4),
 
       es_correct[i] <- scoringRules::es_sample(y = as.numeric(p), dat = p_matrix)
       es_incorrect[i] <- scoringRules::es_sample(y = as.numeric(p), dat = p_matrix_wrong)
+      # Score forecasts against true mean as observation
+      es_correct_vs_true_mean[i] <- scoringRules::es_sample(y = true_mean, dat = p_matrix)
+      es_incorrect_vs_true_mean[i] <- scoringRules::es_sample(y = true_mean, dat = p_matrix_wrong)
     }
   }
 
-  return(list(es_correct = es_correct, es_incorrect = es_incorrect))
+  return(list(es_correct = es_correct, es_incorrect = es_incorrect,
+              es_correct_vs_true_mean = es_correct_vs_true_mean,
+              es_incorrect_vs_true_mean = es_incorrect_vs_true_mean))
 }
 ```
 
@@ -100,6 +118,10 @@ es_mn_sampling <- function(alpha = c(2,4,4),
                            seed = 42,
                            parallel = TRUE,
                            n_cores = parallel::detectCores() - 2){
+
+  # True mean of Dirichlet(alpha) is alpha/sum(alpha)
+  K <- length(alpha)
+  true_mean <- alpha / sum(alpha)
 
   if(parallel && n_cores > 1) {
     # Parallel execution
@@ -129,20 +151,29 @@ es_mn_sampling <- function(alpha = c(2,4,4),
       # Calculate energy scores
       es_correct <- scoringRules::es_sample(y = as.numeric(p), dat = p_matrix)
       es_incorrect <- scoringRules::es_sample(y = as.numeric(p), dat = p_matrix_wrong)
+      # Score forecasts against true mean as observation
+      es_correct_vs_true_mean <- scoringRules::es_sample(y = true_mean, dat = p_matrix)
+      es_incorrect_vs_true_mean <- scoringRules::es_sample(y = true_mean, dat = p_matrix_wrong)
 
-      return(c(es_correct = es_correct, es_incorrect = es_incorrect))
+      return(c(es_correct = es_correct, es_incorrect = es_incorrect,
+               es_correct_vs_true_mean = es_correct_vs_true_mean,
+               es_incorrect_vs_true_mean = es_incorrect_vs_true_mean))
     }, mc.cores = n_cores, mc.set.seed = FALSE)
 
     # Convert results to vectors
     results_matrix <- do.call(rbind, results)
     es_correct <- results_matrix[, 1]
     es_incorrect <- results_matrix[, 2]
+    es_correct_vs_true_mean <- results_matrix[, 3]
+    es_incorrect_vs_true_mean <- results_matrix[, 4]
 
   } else {
     # Sequential execution (fallback)
     set.seed(seed)
     es_correct <- rep(NA, nsim)
     es_incorrect <- rep(NA, nsim)
+    es_correct_vs_true_mean <- rep(NA, nsim)
+    es_incorrect_vs_true_mean <- rep(NA, nsim)
 
     for(i in 1:nsim){
       if(i %% 100 == 0){print(paste0("nsim = ", i))}
@@ -166,10 +197,15 @@ es_mn_sampling <- function(alpha = c(2,4,4),
 
       es_correct[i] <- scoringRules::es_sample(y = as.numeric(p), dat = p_matrix)
       es_incorrect[i] <- scoringRules::es_sample(y = as.numeric(p), dat = p_matrix_wrong)
+      # Score forecasts against true mean as observation
+      es_correct_vs_true_mean[i] <- scoringRules::es_sample(y = true_mean, dat = p_matrix)
+      es_incorrect_vs_true_mean[i] <- scoringRules::es_sample(y = true_mean, dat = p_matrix_wrong)
     }
   }
 
-  return(list(es_correct = es_correct, es_incorrect = es_incorrect))
+  return(list(es_correct = es_correct, es_incorrect = es_incorrect,
+              es_correct_vs_true_mean = es_correct_vs_true_mean,
+              es_incorrect_vs_true_mean = es_incorrect_vs_true_mean))
 }
 ```
 
