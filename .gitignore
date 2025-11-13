@@ -3,7 +3,3 @@
 .RData
 .Ruserdata
 .RProj
-
-# Simulation results (ignore alpha subdirectories but keep structure)
-results/data/alpha_*/
-results/plots/alpha_*/
