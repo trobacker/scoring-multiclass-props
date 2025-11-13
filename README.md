@@ -11,11 +11,11 @@ This project investigates:
 
 ## Key Features
 
-- **Parallel Processing**: Simulation experiments use two-level parallelization (iteration-level and scenario-level) achieving **10-20x speedup**
 - **Comprehensive Scenarios**: Examines misspecified, calibrated (narrow/dispersed), and moderate misspecification cases
 - **Multiple Dimensionalities**: 3-class and 5-class proportion experiments
 - **Rich Visualizations**: Ternary plots, dotplots comparing scoring methods, and distribution comparisons
 - **Reproducible Results**: All simulation results, plots, and data files are version-controlled
+- **Parallel Processing**: Simulation experiments support parallel execution for efficiency
 
 ## Repository Structure
 
@@ -77,7 +77,7 @@ cd scoring-multiclass-props
 
 ### 2. Run Interactive Simulations
 
-Open `src/simulation_1.qmd` in RStudio and run chunks interactively. Parallelization is automatic.
+Open `src/simulation_1.qmd` in RStudio and run chunks interactively.
 
 ### 3. Render Quarto Documents
 
@@ -86,16 +86,14 @@ cd src/
 quarto render simulation_1.qmd
 ```
 
-### 4. Run All Simulations (Maximum Speed)
+### 4. Run All Simulations with Parallel Processing
 
-For the fastest execution using scenario-level parallelization:
+To run all scenarios with parallelization:
 
 ```bash
 cd src/
 Rscript run_all_simulations_parallel.R
 ```
-
-**Expected runtime**: 3-5 minutes for all 4 scenarios (vs. 40-60 minutes originally)
 
 ## Key Simulation Functions
 
@@ -134,16 +132,6 @@ Complete scenario runner that:
 
 3. **Energy scores distinguish well-calibrated vs. misspecified forecasts** across all sample sizes examined
 
-4. **Parallel processing reduces computation time by 10-20x**, enabling rapid experimentation across multiple scenarios and sample sizes
-
-## Performance
-
-| Method | Time (4 scenarios) | Speedup |
-|--------|-------------------|---------|
-| Sequential (original) | 40-60 min | 1x |
-| Parallelized .qmd | 4-8 min | ~10x |
-| Standalone parallel script | 2-4 min | ~20x |
-
 ## Documentation
 
 - **[CHANGELOG.md](docs/CHANGELOG.md)**: Project history and recent changes
@@ -157,7 +145,7 @@ If you use this code in your research, please cite:
 
 ```bibtex
 @misc{scoring-multiclass-props,
-  author = {Backer, Troy},
+  author = {Robacker, Thomas},
   title = {Scoring Multi-Class Proportions},
   year = {2024},
   url = {https://github.com/trobacker/scoring-multiclass-props}
