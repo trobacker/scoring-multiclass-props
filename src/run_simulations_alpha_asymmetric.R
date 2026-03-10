@@ -1,7 +1,8 @@
 #!/usr/bin/env Rscript
-# Parallel execution of all simulation scenarios
-# This script runs all scenarios in parallel for maximum speed
-# Usage: Rscript run_all_simulations_parallel.R
+# Parallel execution of simulation scenarios with ASYMMETRIC alpha
+# True alpha = c(2, 3, 15) - asymmetric distribution skewed toward third category
+# Explores mislocation, dispersion (under/overconfidence) errors
+# Usage: Rscript run_simulations_alpha_asymmetric.R
 
 library(ggplot2)
 library(tidyr)
@@ -11,8 +12,16 @@ library(brms)
 library(Ternary)
 library(parallel)
 
-# Source helper functions
-source("./src/helper-functions.R")
+# Source helper functions - robust path resolution for different execution contexts
+if (file.exists("./src/helper-functions.R")) {
+  # Running from project root
+  source("./src/helper-functions.R")
+} else if (file.exists("helper-functions.R")) {
+  # Running from src/ directory
+  source("helper-functions.R")
+} else {
+  stop("Cannot find helper-functions.R. Please run from project root or src/ directory.")
+}
 
 cat("=========================================\n")
 cat("PARALLEL SIMULATION RUNNER\n")
@@ -559,20 +568,31 @@ run_scenario <- function(scenario_config, n_samp = 100,
 # Record start time
 start_time <- Sys.time()
 
-# Detect if running from RStudio (fork safety issues on macOS)
+# Detect if running from RStudio or Positron (fork safety issues on macOS)
 in_rstudio <- Sys.getenv("RSTUDIO") == "1"
+in_positron <- Sys.getenv("POSITRON") == "1"
+in_gui <- in_rstudio || in_positron
 
-if (in_rstudio) {
-  cat("\nDetected RStudio environment - running scenarios SEQUENTIALLY\n")
-  cat("(Using parallelization within each scenario for ~10x speedup)\n")
-  cat("For maximum speed, run from terminal: Rscript src/run_all_simulations_parallel.R\n\n")
+if (in_gui) {
+  ide_name <- if (in_positron) "Positron" else "RStudio"
+  cat("\n=========================================\n")
+  cat("DETECTED", ide_name, "ENVIRONMENT\n")
+  cat("=========================================\n")
+  cat("Running scenarios SEQUENTIALLY to avoid forking issues on macOS\n")
+  cat("(Using parallelization within each scenario for speedup)\n")
+  cat("\nFor maximum speed, run from terminal:\n")
+  cat("  Rscript src/run_simulations_alpha_asymmetric.R\n\n")
 
   # Run scenarios sequentially (but each uses parallel processing internally)
+  # Use fewer cores to be conservative in GUI environments
+  n_cores_safe <- max(1, min(n_cores_inner, 4))
+  cat("Using", n_cores_safe, "cores per scenario (conservative setting for GUI)\n\n")
+
   all_results <- lapply(scenarios, function(scenario_config) {
     run_scenario(scenario_config,
                  n_samp = 100,
                  nsim = 1000,
-                 n_cores_inner = n_cores_inner)
+                 n_cores_inner = n_cores_safe)
   })
 } else {
   # Run all scenarios in parallel (scenario-level parallelization)
