@@ -276,6 +276,170 @@ ggsave(file.path(output_dir, "asymmetric_alpha_es_differences_vs_n.png"),
 cat("  Plot saved: asymmetric_alpha_es_differences_vs_n.png\n\n")
 
 # ============================================================================
+# TERM DECOMPOSITION ANALYSIS
+# ============================================================================
+cat("Creating term decomposition plots...\n")
+
+# Calculate term summary statistics
+term_summary_stats <- combined_df %>%
+  group_by(scenario_label, method_label, n_counts) %>%
+  summarise(
+    mean_term1_correct = mean(term1_correct),
+    mean_term1_incorrect = mean(term1_incorrect),
+    mean_term2_correct = mean(term2_correct),
+    mean_term2_incorrect = mean(term2_incorrect),
+    mean_term1_diff = mean(term1_diff),
+    mean_term2_diff = mean(term2_diff),
+    .groups = "drop"
+  )
+
+# PLOT 4: Term Decomposition - Side-by-side bars for selected scenarios
+cat("  Plot 4: Term decomposition bar chart\n")
+
+# Filter to a few key n_counts values for clarity
+decomp_data <- term_summary_stats %>%
+  filter(n_counts %in% c(5, 25, 100)) %>%
+  select(scenario_label, method_label, n_counts, mean_term1_correct, mean_term2_correct) %>%
+  pivot_longer(cols = c(mean_term1_correct, mean_term2_correct),
+               names_to = "term",
+               values_to = "value") %>%
+  mutate(term = factor(term,
+                      levels = c("mean_term1_correct", "mean_term2_correct"),
+                      labels = c("Term 1: Distance to observation",
+                                "Term 2: 0.5 × Pairwise distance")))
+
+p4 <- ggplot(decomp_data, aes(x = factor(n_counts), y = value, fill = term)) +
+  geom_col(position = "dodge", alpha = 0.8, width = 0.7) +
+  facet_wrap(~ scenario_label, ncol = 2, scales = "free_y") +
+  labs(
+    title = "Energy Score Decomposition: Correct Forecasts",
+    subtitle = "ES = Term 1 - Term 2. Selected n_counts values shown.",
+    x = "n_counts",
+    y = "Term Value",
+    fill = "Component"
+  ) +
+  theme_bw(base_size = 11) +
+  theme(
+    plot.title = element_text(face = "bold", size = 13),
+    legend.position = "bottom",
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    strip.background = element_rect(fill = "gray90"),
+    strip.text = element_text(face = "bold", size = 10)
+  ) +
+  scale_fill_manual(values = c("#E41A1C", "#377EB8"))
+
+ggsave(file.path(output_dir, "asymmetric_alpha_term_decomposition_bars.png"),
+       p4, width = 11, height = 8, dpi = 300)
+
+# PLOT 5: Term1 vs Term2 relationship scatter
+cat("  Plot 5: Term1 vs Term2 scatter\n")
+
+# Define scenario colors
+scenario_colors <- c(
+  "Scenario 1: Misspecified" = "#E41A1C",
+  "Scenario 2: Narrow/Calibrated" = "#377EB8",
+  "Scenario 3: Dispersed/Calibrated" = "#4DAF4A",
+  "Scenario 4: Less Misspecified" = "#984EA3"
+)
+
+# Sample data for clarity (use n_counts = 100)
+scatter_data <- combined_df %>%
+  filter(n_counts == 100) %>%
+  select(scenario_label, method_label, term1_correct, term2_correct)
+
+p5 <- ggplot(scatter_data, aes(x = term2_correct, y = term1_correct, color = scenario_label)) +
+  geom_point(alpha = 0.3, size = 1) +
+  stat_ellipse(level = 0.95, linewidth = 1) +
+  facet_wrap(~ method_label, ncol = 2) +
+  labs(
+    title = "Term 1 vs Term 2 Relationship (n_counts = 100)",
+    subtitle = "95% confidence ellipses by scenario. ES = Term 1 - Term 2",
+    x = "Term 2: 0.5 × Mean Pairwise Distance",
+    y = "Term 1: Mean Distance to Observation",
+    color = "Scenario"
+  ) +
+  theme_bw(base_size = 11) +
+  theme(
+    plot.title = element_text(face = "bold", size = 13),
+    legend.position = "bottom",
+    strip.background = element_rect(fill = "gray90"),
+    strip.text = element_text(face = "bold", size = 10)
+  ) +
+  scale_color_manual(values = scenario_colors) +
+  guides(color = guide_legend(override.aes = list(alpha = 1, size = 3), ncol = 2))
+
+ggsave(file.path(output_dir, "asymmetric_alpha_term_scatter.png"),
+       p5, width = 11, height = 6, dpi = 300)
+
+# PLOT 6: Term differences vs n_counts
+cat("  Plot 6: Term differences vs n_counts\n")
+
+# Reshape for plotting
+term_diff_long <- term_summary_stats %>%
+  pivot_longer(cols = c(mean_term1_diff, mean_term2_diff),
+               names_to = "term",
+               values_to = "mean_diff") %>%
+  mutate(term = factor(term,
+                      levels = c("mean_term1_diff", "mean_term2_diff"),
+                      labels = c("Term 1 difference", "Term 2 difference")))
+
+p6 <- ggplot(term_diff_long, aes(x = n_counts, y = mean_diff,
+                                 color = scenario_label,
+                                 linetype = method_label,
+                                 shape = method_label)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 2.5) +
+  geom_hline(yintercept = 0, linetype = "solid", color = "black", alpha = 0.5) +
+  facet_wrap(~ term, ncol = 2, scales = "free_y") +
+  scale_x_log10(
+    breaks = c(1, 2, 3, 4, 5, 10, 25, 50, 100, 500),
+    labels = c(1, 2, 3, 4, 5, 10, 25, 50, 100, 500)
+  ) +
+  scale_color_manual(
+    values = scenario_colors,
+    name = "Scenario"
+  ) +
+  scale_linetype_manual(
+    values = c("Multinomial" = "solid", "Non-Multinomial" = "dashed"),
+    name = "Method"
+  ) +
+  scale_shape_manual(
+    values = c("Multinomial" = 16, "Non-Multinomial" = 17),
+    name = "Method"
+  ) +
+  labs(
+    title = "Term Differences by Scenario (Correct - Incorrect)",
+    subtitle = "How term1 and term2 contribute to overall ES difference",
+    x = "n_counts (log scale)",
+    y = "Mean Term Difference"
+  ) +
+  theme_bw(base_size = 11) +
+  theme(
+    plot.title = element_text(face = "bold", size = 13),
+    legend.position = "bottom",
+    legend.box = "vertical",
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    strip.background = element_rect(fill = "gray90"),
+    strip.text = element_text(face = "bold", size = 10)
+  ) +
+  guides(
+    color = guide_legend(order = 1, ncol = 2),
+    linetype = guide_legend(order = 2),
+    shape = guide_legend(order = 2)
+  )
+
+ggsave(file.path(output_dir, "asymmetric_alpha_term_differences_vs_n.png"),
+       p6, width = 11, height = 6, dpi = 300)
+
+cat("  Term decomposition plots saved\n\n")
+
+# Save term summary statistics
+write.csv(term_summary_stats,
+          file.path(output_dir, "asymmetric_alpha_term_summary_stats.csv"),
+          row.names = FALSE)
+cat("  Term summary statistics saved\n\n")
+
+# ============================================================================
 # Print summary
 # ============================================================================
 cat("=========================================\n")
@@ -284,9 +448,16 @@ cat("=========================================\n")
 cat("Scenarios analyzed:", nrow(scenarios), "\n")
 cat("Total simulations:", nrow(combined_df), "\n")
 cat("\nFiles created:\n")
-cat("  - asymmetric_alpha_energy_scores_vs_n.png\n")
-cat("  - asymmetric_alpha_discrimination_vs_n.png\n")
-cat("  - asymmetric_alpha_es_differences_vs_n.png\n")
-cat("  - asymmetric_alpha_summary_stats.csv\n\n")
+cat("  Energy Score Plots:\n")
+cat("    - asymmetric_alpha_energy_scores_vs_n.png\n")
+cat("    - asymmetric_alpha_discrimination_vs_n.png\n")
+cat("    - asymmetric_alpha_es_differences_vs_n.png\n")
+cat("  Term Decomposition Plots:\n")
+cat("    - asymmetric_alpha_term_decomposition_bars.png\n")
+cat("    - asymmetric_alpha_term_scatter.png\n")
+cat("    - asymmetric_alpha_term_differences_vs_n.png\n")
+cat("  Summary Statistics:\n")
+cat("    - asymmetric_alpha_summary_stats.csv\n")
+cat("    - asymmetric_alpha_term_summary_stats.csv\n\n")
 
 cat("Done!\n")
