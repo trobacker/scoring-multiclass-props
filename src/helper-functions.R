@@ -2,22 +2,33 @@
 
 ## define a custom function to calculate energy score storing both terms
 manual_energy_score <- function(y, dat) {
-  # y: vector of length d
+  # y: vector of length d (observed outcome)
   # dat: matrix with rows = dimensions, columns = samples (d × n)
-  
+  #
+  # Returns energy score decomposed into two components:
+  #   ES = term1 - term2
+  #
+  # The energy score (Gneiting & Raftery, 2007) simultaneously evaluates
+  # calibration and sharpness of probabilistic forecasts
+
   d <- nrow(dat)
   n <- ncol(dat)
-  
-  # Term 1: mean distance to observation
+
+  # Term 1: mean distance from forecast samples to observation
+  # Measures how well forecast samples align with the actual outcome
   diff_y <- dat - matrix(y, nrow = d, ncol = n)
   term1 <- mean(sqrt(colSums(diff_y^2)))
-  
-  # Term 2: mean pairwise distance among samples
+
+  # Term 2: 0.5 × mean pairwise distance among forecast samples
+  # Measures the spread/dispersion of the forecast ensemble
+  # Note: 0.5 multiplier included here so ES = term1 - term2 (simple linear form)
   dmat <- as.matrix(dist(t(dat)))
-  term2 <- mean(dmat)
-  
-  ES <- term1 - 0.5 * term2
-  
+  term2 <- 0.5 * mean(dmat)
+
+  # Energy score: balances forecast-observation distance against ensemble spread
+  # Lower scores indicate better forecasts
+  ES <- term1 - term2
+
   list(
     term1 = as.numeric(term1),
     term2 = as.numeric(term2),
