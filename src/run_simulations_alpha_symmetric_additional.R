@@ -40,18 +40,17 @@ cat("Using", n_cores_inner, "cores per scenario for iteration parallelization\n\
 # These are copied here for standalone execution
 
 # es_sampling function (parallelized)
+# Now generates fresh forecast samples for each simulation iteration
 es_sampling <- function(alpha = c(2,4,4),
-                           thetas = NULL,
-                           thetas_wrong = NULL,
+                           alpha_wrong = NULL,
                            n_counts = 5,
+                           n_samp = 100,
                            nsim = 1000,
                            seed = 42,
                            parallel = TRUE,
                            n_cores = parallel::detectCores() - 2){
 
   K <- length(alpha)
-  p_matrix <- matrix(unlist(thetas), nrow = K, byrow = FALSE)
-  p_matrix_wrong <- matrix(unlist(thetas_wrong), nrow = K, byrow = FALSE)
 
   # True mean of Dirichlet(alpha) is alpha/sum(alpha)
   true_mean <- alpha / sum(alpha)
@@ -59,9 +58,19 @@ es_sampling <- function(alpha = c(2,4,4),
   if(parallel && n_cores > 1) {
     results <- parallel::mclapply(1:nsim, function(i) {
       set.seed(seed + i)
+
+      # Generate fresh forecast samples for this iteration
+      thetas <- lapply(FUN = draw_one_dirichlet, X = rep(1, n_samp), alpha = alpha)
+      thetas_wrong <- lapply(FUN = draw_one_dirichlet, X = rep(1, n_samp), alpha = alpha_wrong)
+      p_matrix <- matrix(unlist(thetas), nrow = K, byrow = FALSE)
+      p_matrix_wrong <- matrix(unlist(thetas_wrong), nrow = K, byrow = FALSE)
+
+      # Generate observation
       prob_vec <- as.numeric(brms::rdirichlet(1, alpha))
       C <- rmultinom(n = 1, size = n_counts, prob = prob_vec)
       p <- C / n_counts
+
+      # Score forecasts
       es_correct <- scoringRules::es_sample(y = as.numeric(p), dat = p_matrix)
       es_incorrect <- scoringRules::es_sample(y = as.numeric(p), dat = p_matrix_wrong)
       # Score forecasts against true mean as observation
@@ -84,9 +93,18 @@ es_sampling <- function(alpha = c(2,4,4),
     es_correct_vs_true_mean <- rep(NA, nsim)
     es_incorrect_vs_true_mean <- rep(NA, nsim)
     for(i in 1:nsim){
+      # Generate fresh forecast samples for this iteration
+      thetas <- lapply(FUN = draw_one_dirichlet, X = rep(1, n_samp), alpha = alpha)
+      thetas_wrong <- lapply(FUN = draw_one_dirichlet, X = rep(1, n_samp), alpha = alpha_wrong)
+      p_matrix <- matrix(unlist(thetas), nrow = K, byrow = FALSE)
+      p_matrix_wrong <- matrix(unlist(thetas_wrong), nrow = K, byrow = FALSE)
+
+      # Generate observation
       prob_vec <- as.numeric(brms::rdirichlet(1, alpha))
       C <- rmultinom(n = 1, size = n_counts, prob = prob_vec)
       p <- C / n_counts
+
+      # Score forecasts
       es_correct[i] <- scoringRules::es_sample(y = as.numeric(p), dat = p_matrix)
       es_incorrect[i] <- scoringRules::es_sample(y = as.numeric(p), dat = p_matrix_wrong)
       # Score forecasts against true mean as observation
@@ -100,10 +118,12 @@ es_sampling <- function(alpha = c(2,4,4),
 }
 
 # es_mn_sampling function (parallelized)
+# Now generates fresh forecast samples for each simulation iteration
+# IMPORTANT: Uses same seed offset as es_sampling to ensure same base thetas
 es_mn_sampling <- function(alpha = c(2,4,4),
-                           thetas = NULL,
-                           thetas_wrong = NULL,
+                           alpha_wrong = NULL,
                            n_counts = 5,
+                           n_samp = 100,
                            nsim = 1000,
                            N_multinomial = 100,
                            seed = 42,
@@ -117,10 +137,17 @@ es_mn_sampling <- function(alpha = c(2,4,4),
   if(parallel && n_cores > 1) {
     results <- parallel::mclapply(1:nsim, function(i) {
       set.seed(seed + i)
+
+      # Generate fresh forecast samples for this iteration (same as es_sampling with same seed)
+      thetas <- lapply(FUN = draw_one_dirichlet, X = rep(1, n_samp), alpha = alpha)
+      thetas_wrong <- lapply(FUN = draw_one_dirichlet, X = rep(1, n_samp), alpha = alpha_wrong)
+
+      # Generate observation
       prob_vec <- as.numeric(brms::rdirichlet(1, alpha))
       C <- rmultinom(n = 1, size = n_counts, prob = prob_vec)
       p <- C / n_counts
 
+      # Apply multinomial sampling to forecasts
       samp_multinomial_counts <- do.call(cbind,
         lapply(thetas, function(theta) rmultinom(n = N_multinomial, size = n_counts, prob = theta))
       )
@@ -131,6 +158,7 @@ es_mn_sampling <- function(alpha = c(2,4,4),
       p_matrix <- samp_multinomial_counts / n_counts
       p_matrix_wrong <- samp_multinomial_counts_wrong / n_counts
 
+      # Score forecasts
       es_correct <- scoringRules::es_sample(y = as.numeric(p), dat = p_matrix)
       es_incorrect <- scoringRules::es_sample(y = as.numeric(p), dat = p_matrix_wrong)
       # Score forecasts against true mean as observation
@@ -153,9 +181,16 @@ es_mn_sampling <- function(alpha = c(2,4,4),
     es_correct_vs_true_mean <- rep(NA, nsim)
     es_incorrect_vs_true_mean <- rep(NA, nsim)
     for(i in 1:nsim){
+      # Generate fresh forecast samples for this iteration
+      thetas <- lapply(FUN = draw_one_dirichlet, X = rep(1, n_samp), alpha = alpha)
+      thetas_wrong <- lapply(FUN = draw_one_dirichlet, X = rep(1, n_samp), alpha = alpha_wrong)
+
+      # Generate observation
       prob_vec <- as.numeric(brms::rdirichlet(1, alpha))
       C <- rmultinom(n = 1, size = n_counts, prob = prob_vec)
       p <- C / n_counts
+
+      # Apply multinomial sampling to forecasts
       samp_multinomial_counts <- do.call(cbind,
         lapply(thetas, function(theta) rmultinom(n = N_multinomial, size = n_counts, prob = theta))
       )
@@ -165,6 +200,7 @@ es_mn_sampling <- function(alpha = c(2,4,4),
       p_matrix <- samp_multinomial_counts / n_counts
       p_matrix_wrong <- samp_multinomial_counts_wrong / n_counts
 
+      # Score forecasts
       es_correct[i] <- scoringRules::es_sample(y = as.numeric(p), dat = p_matrix)
       es_incorrect[i] <- scoringRules::es_sample(y = as.numeric(p), dat = p_matrix_wrong)
       # Score forecasts against true mean as observation
@@ -192,7 +228,7 @@ result_to_df <- function(result, n_counts, method = "mn") {
   )
 }
 
-run_simulation_experiment <- function(alpha, thetas, thetas_wrong,
+run_simulation_experiment <- function(alpha, alpha_wrong, n_samp = 100,
                                       n_counts_vec = c(1, 2, 3, 4, 5, 10, 25, 50, 100, 500),
                                       nsim = 1000, base_seed = 42,
                                       parallel = TRUE, n_cores = parallel::detectCores() - 2) {
@@ -200,10 +236,10 @@ run_simulation_experiment <- function(alpha, thetas, thetas_wrong,
   for (i in seq_along(n_counts_vec)) {
     n <- n_counts_vec[i]
     cat("  n_counts =", n, "...")
-    result_nonmn <- es_sampling(thetas = thetas, thetas_wrong = thetas_wrong, alpha = alpha,
+    result_nonmn <- es_sampling(alpha = alpha, alpha_wrong = alpha_wrong, n_samp = n_samp,
                                 seed = base_seed + i, nsim = nsim, n_counts = n,
                                 parallel = parallel, n_cores = n_cores)
-    result_mn <- es_mn_sampling(thetas = thetas, thetas_wrong = thetas_wrong, alpha = alpha,
+    result_mn <- es_mn_sampling(alpha = alpha, alpha_wrong = alpha_wrong, n_samp = n_samp,
                                seed = base_seed + 100 + i, nsim = nsim, n_counts = n,
                                parallel = parallel, n_cores = n_cores)
     results_list[[paste0("nonmn_", i)]] <- result_to_df(result_nonmn, n, "non-mn")
@@ -511,15 +547,11 @@ run_scenario <- function(scenario_config, n_samp = 100,
   cat("Alpha (wrong):", paste(scenario_config$alpha_wrong, collapse = ", "), "\n")
   cat("========================================\n")
 
-  # Pre-allocate distributions
-  thetas <- lapply(FUN = draw_one_dirichlet, X = rep(1, n_samp), alpha = scenario_config$alpha)
-  thetas_wrong <- lapply(FUN = draw_one_dirichlet, X = rep(1, n_samp), alpha = scenario_config$alpha_wrong)
-
-  # Run simulations
+  # Run simulations (forecasts now generated fresh for each iteration)
   df_results <- run_simulation_experiment(
     alpha = scenario_config$alpha,
-    thetas = thetas,
-    thetas_wrong = thetas_wrong,
+    alpha_wrong = scenario_config$alpha_wrong,
+    n_samp = n_samp,
     n_counts_vec = n_counts_vec,
     nsim = nsim,
     base_seed = scenario_config$base_seed,
