@@ -1,5 +1,30 @@
 ## functions for scoring exploration
 
+## define a custom function to calculate energy score storing both terms
+manual_energy_score <- function(y, dat) {
+  # y: vector of length d
+  # dat: matrix with rows = dimensions, columns = samples (d × n)
+  
+  d <- nrow(dat)
+  n <- ncol(dat)
+  
+  # Term 1: mean distance to observation
+  diff_y <- dat - matrix(y, nrow = d, ncol = n)
+  term1 <- mean(sqrt(colSums(diff_y^2)))
+  
+  # Term 2: mean pairwise distance among samples
+  dmat <- as.matrix(dist(t(dat)))
+  term2 <- mean(dmat)
+  
+  ES <- term1 - 0.5 * term2
+  
+  list(
+    term1 = as.numeric(term1),
+    term2 = as.numeric(term2),
+    ES    = as.numeric(ES)
+  )
+}
+
 ## define a density function to use dirichlet values for colors
 dd_func <- function(a, b, c, alpha)
   brms::ddirichlet(cbind(a, b, c), alpha)
