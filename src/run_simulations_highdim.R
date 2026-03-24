@@ -86,6 +86,14 @@ es_sampling <- function(alpha,
     es_incorrect <- results_matrix[, 2]
     es_correct_vs_true_mean <- results_matrix[, 3]
     es_incorrect_vs_true_mean <- results_matrix[, 4]
+    term1_correct <- results_matrix[, 5]
+    term1_incorrect <- results_matrix[, 6]
+    term1_correct_vs_true_mean <- results_matrix[, 7]
+    term1_incorrect_vs_true_mean <- results_matrix[, 8]
+    term2_correct <- results_matrix[, 9]
+    term2_incorrect <- results_matrix[, 10]
+    term2_correct_vs_true_mean <- results_matrix[, 11]
+    term2_incorrect_vs_true_mean <- results_matrix[, 12]
   } else {
     set.seed(seed)
     es_correct <- rep(NA, nsim)
