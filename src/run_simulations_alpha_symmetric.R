@@ -40,18 +40,17 @@ cat("Using", n_cores_inner, "cores per scenario for iteration parallelization\n\
 # These are copied here for standalone execution
 
 # es_sampling function (parallelized)
+# Now generates fresh forecast samples for each simulation iteration
 es_sampling <- function(alpha = c(2,4,4),
-                           thetas = NULL,
-                           thetas_wrong = NULL,
+                           alpha_wrong = NULL,
                            n_counts = 5,
+                           n_samp = 100,
                            nsim = 1000,
                            seed = 42,
                            parallel = TRUE,
                            n_cores = parallel::detectCores() - 2){
 
   K <- length(alpha)
-  p_matrix <- matrix(unlist(thetas), nrow = K, byrow = FALSE)
-  p_matrix_wrong <- matrix(unlist(thetas_wrong), nrow = K, byrow = FALSE)
 
   # True mean of Dirichlet(alpha) is alpha/sum(alpha)
   true_mean <- alpha / sum(alpha)
@@ -59,17 +58,39 @@ es_sampling <- function(alpha = c(2,4,4),
   if(parallel && n_cores > 1) {
     results <- parallel::mclapply(1:nsim, function(i) {
       set.seed(seed + i)
+
+      # Generate fresh forecast samples for this iteration
+      thetas <- lapply(FUN = draw_one_dirichlet, X = rep(1, n_samp), alpha = alpha)
+      thetas_wrong <- lapply(FUN = draw_one_dirichlet, X = rep(1, n_samp), alpha = alpha_wrong)
+      p_matrix <- matrix(unlist(thetas), nrow = K, byrow = FALSE)
+      p_matrix_wrong <- matrix(unlist(thetas_wrong), nrow = K, byrow = FALSE)
+
+      # Generate observation
       prob_vec <- as.numeric(brms::rdirichlet(1, alpha))
       C <- rmultinom(n = 1, size = n_counts, prob = prob_vec)
       p <- C / n_counts
-      es_correct <- scoringRules::es_sample(y = as.numeric(p), dat = p_matrix)
-      es_incorrect <- scoringRules::es_sample(y = as.numeric(p), dat = p_matrix_wrong)
+
+      # Score forecasts using manual energy score (returns ES, term1, term2)
+      es_result_correct <- manual_energy_score(y = as.numeric(p), dat = p_matrix)
+      es_result_incorrect <- manual_energy_score(y = as.numeric(p), dat = p_matrix_wrong)
       # Score forecasts against true mean as observation
-      es_correct_vs_true_mean <- scoringRules::es_sample(y = true_mean, dat = p_matrix)
-      es_incorrect_vs_true_mean <- scoringRules::es_sample(y = true_mean, dat = p_matrix_wrong)
-      return(c(es_correct = es_correct, es_incorrect = es_incorrect,
-               es_correct_vs_true_mean = es_correct_vs_true_mean,
-               es_incorrect_vs_true_mean = es_incorrect_vs_true_mean))
+      es_result_correct_vs_true_mean <- manual_energy_score(y = true_mean, dat = p_matrix)
+      es_result_incorrect_vs_true_mean <- manual_energy_score(y = true_mean, dat = p_matrix_wrong)
+
+      return(c(
+        es_correct = es_result_correct$ES,
+        es_incorrect = es_result_incorrect$ES,
+        es_correct_vs_true_mean = es_result_correct_vs_true_mean$ES,
+        es_incorrect_vs_true_mean = es_result_incorrect_vs_true_mean$ES,
+        term1_correct = es_result_correct$term1,
+        term1_incorrect = es_result_incorrect$term1,
+        term1_correct_vs_true_mean = es_result_correct_vs_true_mean$term1,
+        term1_incorrect_vs_true_mean = es_result_incorrect_vs_true_mean$term1,
+        term2_correct = es_result_correct$term2,
+        term2_incorrect = es_result_incorrect$term2,
+        term2_correct_vs_true_mean = es_result_correct_vs_true_mean$term2,
+        term2_incorrect_vs_true_mean = es_result_incorrect_vs_true_mean$term2
+      ))
     }, mc.cores = n_cores, mc.set.seed = FALSE)
 
     results_matrix <- do.call(rbind, results)
@@ -77,33 +98,87 @@ es_sampling <- function(alpha = c(2,4,4),
     es_incorrect <- results_matrix[, 2]
     es_correct_vs_true_mean <- results_matrix[, 3]
     es_incorrect_vs_true_mean <- results_matrix[, 4]
+    term1_correct <- results_matrix[, 5]
+    term1_incorrect <- results_matrix[, 6]
+    term1_correct_vs_true_mean <- results_matrix[, 7]
+    term1_incorrect_vs_true_mean <- results_matrix[, 8]
+    term2_correct <- results_matrix[, 9]
+    term2_incorrect <- results_matrix[, 10]
+    term2_correct_vs_true_mean <- results_matrix[, 11]
+    term2_incorrect_vs_true_mean <- results_matrix[, 12]
   } else {
     set.seed(seed)
     es_correct <- rep(NA, nsim)
     es_incorrect <- rep(NA, nsim)
     es_correct_vs_true_mean <- rep(NA, nsim)
     es_incorrect_vs_true_mean <- rep(NA, nsim)
+    term1_correct <- rep(NA, nsim)
+    term1_incorrect <- rep(NA, nsim)
+    term1_correct_vs_true_mean <- rep(NA, nsim)
+    term1_incorrect_vs_true_mean <- rep(NA, nsim)
+    term2_correct <- rep(NA, nsim)
+    term2_incorrect <- rep(NA, nsim)
+    term2_correct_vs_true_mean <- rep(NA, nsim)
+    term2_incorrect_vs_true_mean <- rep(NA, nsim)
+
     for(i in 1:nsim){
+      # Generate fresh forecast samples for this iteration
+      thetas <- lapply(FUN = draw_one_dirichlet, X = rep(1, n_samp), alpha = alpha)
+      thetas_wrong <- lapply(FUN = draw_one_dirichlet, X = rep(1, n_samp), alpha = alpha_wrong)
+      p_matrix <- matrix(unlist(thetas), nrow = K, byrow = FALSE)
+      p_matrix_wrong <- matrix(unlist(thetas_wrong), nrow = K, byrow = FALSE)
+
+      # Generate observation
       prob_vec <- as.numeric(brms::rdirichlet(1, alpha))
       C <- rmultinom(n = 1, size = n_counts, prob = prob_vec)
       p <- C / n_counts
-      es_correct[i] <- scoringRules::es_sample(y = as.numeric(p), dat = p_matrix)
-      es_incorrect[i] <- scoringRules::es_sample(y = as.numeric(p), dat = p_matrix_wrong)
+
+      # Score forecasts using manual energy score (returns ES, term1, term2)
+      es_result_correct <- manual_energy_score(y = as.numeric(p), dat = p_matrix)
+      es_result_incorrect <- manual_energy_score(y = as.numeric(p), dat = p_matrix_wrong)
       # Score forecasts against true mean as observation
-      es_correct_vs_true_mean[i] <- scoringRules::es_sample(y = true_mean, dat = p_matrix)
-      es_incorrect_vs_true_mean[i] <- scoringRules::es_sample(y = true_mean, dat = p_matrix_wrong)
+      es_result_correct_vs_true_mean <- manual_energy_score(y = true_mean, dat = p_matrix)
+      es_result_incorrect_vs_true_mean <- manual_energy_score(y = true_mean, dat = p_matrix_wrong)
+
+      # Extract ES values
+      es_correct[i] <- es_result_correct$ES
+      es_incorrect[i] <- es_result_incorrect$ES
+      es_correct_vs_true_mean[i] <- es_result_correct_vs_true_mean$ES
+      es_incorrect_vs_true_mean[i] <- es_result_incorrect_vs_true_mean$ES
+
+      # Extract term1 values
+      term1_correct[i] <- es_result_correct$term1
+      term1_incorrect[i] <- es_result_incorrect$term1
+      term1_correct_vs_true_mean[i] <- es_result_correct_vs_true_mean$term1
+      term1_incorrect_vs_true_mean[i] <- es_result_incorrect_vs_true_mean$term1
+
+      # Extract term2 values
+      term2_correct[i] <- es_result_correct$term2
+      term2_incorrect[i] <- es_result_incorrect$term2
+      term2_correct_vs_true_mean[i] <- es_result_correct_vs_true_mean$term2
+      term2_incorrect_vs_true_mean[i] <- es_result_incorrect_vs_true_mean$term2
     }
   }
-  return(list(es_correct = es_correct, es_incorrect = es_incorrect,
-              es_correct_vs_true_mean = es_correct_vs_true_mean,
-              es_incorrect_vs_true_mean = es_incorrect_vs_true_mean))
+  return(list(
+    es_correct = es_correct, es_incorrect = es_incorrect,
+    es_correct_vs_true_mean = es_correct_vs_true_mean,
+    es_incorrect_vs_true_mean = es_incorrect_vs_true_mean,
+    term1_correct = term1_correct, term1_incorrect = term1_incorrect,
+    term1_correct_vs_true_mean = term1_correct_vs_true_mean,
+    term1_incorrect_vs_true_mean = term1_incorrect_vs_true_mean,
+    term2_correct = term2_correct, term2_incorrect = term2_incorrect,
+    term2_correct_vs_true_mean = term2_correct_vs_true_mean,
+    term2_incorrect_vs_true_mean = term2_incorrect_vs_true_mean
+  ))
 }
 
 # es_mn_sampling function (parallelized)
+# Now generates fresh forecast samples for each simulation iteration
+# IMPORTANT: Uses same seed offset as es_sampling to ensure same base thetas
 es_mn_sampling <- function(alpha = c(2,4,4),
-                           thetas = NULL,
-                           thetas_wrong = NULL,
+                           alpha_wrong = NULL,
                            n_counts = 5,
+                           n_samp = 100,
                            nsim = 1000,
                            N_multinomial = 100,
                            seed = 42,
@@ -117,10 +192,17 @@ es_mn_sampling <- function(alpha = c(2,4,4),
   if(parallel && n_cores > 1) {
     results <- parallel::mclapply(1:nsim, function(i) {
       set.seed(seed + i)
+
+      # Generate fresh forecast samples for this iteration (same as es_sampling with same seed)
+      thetas <- lapply(FUN = draw_one_dirichlet, X = rep(1, n_samp), alpha = alpha)
+      thetas_wrong <- lapply(FUN = draw_one_dirichlet, X = rep(1, n_samp), alpha = alpha_wrong)
+
+      # Generate observation
       prob_vec <- as.numeric(brms::rdirichlet(1, alpha))
       C <- rmultinom(n = 1, size = n_counts, prob = prob_vec)
       p <- C / n_counts
 
+      # Apply multinomial sampling to forecasts
       samp_multinomial_counts <- do.call(cbind,
         lapply(thetas, function(theta) rmultinom(n = N_multinomial, size = n_counts, prob = theta))
       )
@@ -131,14 +213,27 @@ es_mn_sampling <- function(alpha = c(2,4,4),
       p_matrix <- samp_multinomial_counts / n_counts
       p_matrix_wrong <- samp_multinomial_counts_wrong / n_counts
 
-      es_correct <- scoringRules::es_sample(y = as.numeric(p), dat = p_matrix)
-      es_incorrect <- scoringRules::es_sample(y = as.numeric(p), dat = p_matrix_wrong)
+      # Score forecasts using manual energy score (returns ES, term1, term2)
+      es_result_correct <- manual_energy_score(y = as.numeric(p), dat = p_matrix)
+      es_result_incorrect <- manual_energy_score(y = as.numeric(p), dat = p_matrix_wrong)
       # Score forecasts against true mean as observation
-      es_correct_vs_true_mean <- scoringRules::es_sample(y = true_mean, dat = p_matrix)
-      es_incorrect_vs_true_mean <- scoringRules::es_sample(y = true_mean, dat = p_matrix_wrong)
-      return(c(es_correct = es_correct, es_incorrect = es_incorrect,
-               es_correct_vs_true_mean = es_correct_vs_true_mean,
-               es_incorrect_vs_true_mean = es_incorrect_vs_true_mean))
+      es_result_correct_vs_true_mean <- manual_energy_score(y = true_mean, dat = p_matrix)
+      es_result_incorrect_vs_true_mean <- manual_energy_score(y = true_mean, dat = p_matrix_wrong)
+
+      return(c(
+        es_correct = es_result_correct$ES,
+        es_incorrect = es_result_incorrect$ES,
+        es_correct_vs_true_mean = es_result_correct_vs_true_mean$ES,
+        es_incorrect_vs_true_mean = es_result_incorrect_vs_true_mean$ES,
+        term1_correct = es_result_correct$term1,
+        term1_incorrect = es_result_incorrect$term1,
+        term1_correct_vs_true_mean = es_result_correct_vs_true_mean$term1,
+        term1_incorrect_vs_true_mean = es_result_incorrect_vs_true_mean$term1,
+        term2_correct = es_result_correct$term2,
+        term2_incorrect = es_result_incorrect$term2,
+        term2_correct_vs_true_mean = es_result_correct_vs_true_mean$term2,
+        term2_incorrect_vs_true_mean = es_result_incorrect_vs_true_mean$term2
+      ))
     }, mc.cores = n_cores, mc.set.seed = FALSE)
 
     results_matrix <- do.call(rbind, results)
@@ -146,16 +241,40 @@ es_mn_sampling <- function(alpha = c(2,4,4),
     es_incorrect <- results_matrix[, 2]
     es_correct_vs_true_mean <- results_matrix[, 3]
     es_incorrect_vs_true_mean <- results_matrix[, 4]
+    term1_correct <- results_matrix[, 5]
+    term1_incorrect <- results_matrix[, 6]
+    term1_correct_vs_true_mean <- results_matrix[, 7]
+    term1_incorrect_vs_true_mean <- results_matrix[, 8]
+    term2_correct <- results_matrix[, 9]
+    term2_incorrect <- results_matrix[, 10]
+    term2_correct_vs_true_mean <- results_matrix[, 11]
+    term2_incorrect_vs_true_mean <- results_matrix[, 12]
   } else {
     set.seed(seed)
     es_correct <- rep(NA, nsim)
     es_incorrect <- rep(NA, nsim)
     es_correct_vs_true_mean <- rep(NA, nsim)
     es_incorrect_vs_true_mean <- rep(NA, nsim)
+    term1_correct <- rep(NA, nsim)
+    term1_incorrect <- rep(NA, nsim)
+    term1_correct_vs_true_mean <- rep(NA, nsim)
+    term1_incorrect_vs_true_mean <- rep(NA, nsim)
+    term2_correct <- rep(NA, nsim)
+    term2_incorrect <- rep(NA, nsim)
+    term2_correct_vs_true_mean <- rep(NA, nsim)
+    term2_incorrect_vs_true_mean <- rep(NA, nsim)
+
     for(i in 1:nsim){
+      # Generate fresh forecast samples for this iteration
+      thetas <- lapply(FUN = draw_one_dirichlet, X = rep(1, n_samp), alpha = alpha)
+      thetas_wrong <- lapply(FUN = draw_one_dirichlet, X = rep(1, n_samp), alpha = alpha_wrong)
+
+      # Generate observation
       prob_vec <- as.numeric(brms::rdirichlet(1, alpha))
       C <- rmultinom(n = 1, size = n_counts, prob = prob_vec)
       p <- C / n_counts
+
+      # Apply multinomial sampling to forecasts
       samp_multinomial_counts <- do.call(cbind,
         lapply(thetas, function(theta) rmultinom(n = N_multinomial, size = n_counts, prob = theta))
       )
@@ -165,16 +284,43 @@ es_mn_sampling <- function(alpha = c(2,4,4),
       p_matrix <- samp_multinomial_counts / n_counts
       p_matrix_wrong <- samp_multinomial_counts_wrong / n_counts
 
-      es_correct[i] <- scoringRules::es_sample(y = as.numeric(p), dat = p_matrix)
-      es_incorrect[i] <- scoringRules::es_sample(y = as.numeric(p), dat = p_matrix_wrong)
+      # Score forecasts using manual energy score (returns ES, term1, term2)
+      es_result_correct <- manual_energy_score(y = as.numeric(p), dat = p_matrix)
+      es_result_incorrect <- manual_energy_score(y = as.numeric(p), dat = p_matrix_wrong)
       # Score forecasts against true mean as observation
-      es_correct_vs_true_mean[i] <- scoringRules::es_sample(y = true_mean, dat = p_matrix)
-      es_incorrect_vs_true_mean[i] <- scoringRules::es_sample(y = true_mean, dat = p_matrix_wrong)
+      es_result_correct_vs_true_mean <- manual_energy_score(y = true_mean, dat = p_matrix)
+      es_result_incorrect_vs_true_mean <- manual_energy_score(y = true_mean, dat = p_matrix_wrong)
+
+      # Extract ES values
+      es_correct[i] <- es_result_correct$ES
+      es_incorrect[i] <- es_result_incorrect$ES
+      es_correct_vs_true_mean[i] <- es_result_correct_vs_true_mean$ES
+      es_incorrect_vs_true_mean[i] <- es_result_incorrect_vs_true_mean$ES
+
+      # Extract term1 values
+      term1_correct[i] <- es_result_correct$term1
+      term1_incorrect[i] <- es_result_incorrect$term1
+      term1_correct_vs_true_mean[i] <- es_result_correct_vs_true_mean$term1
+      term1_incorrect_vs_true_mean[i] <- es_result_incorrect_vs_true_mean$term1
+
+      # Extract term2 values
+      term2_correct[i] <- es_result_correct$term2
+      term2_incorrect[i] <- es_result_incorrect$term2
+      term2_correct_vs_true_mean[i] <- es_result_correct_vs_true_mean$term2
+      term2_incorrect_vs_true_mean[i] <- es_result_incorrect_vs_true_mean$term2
     }
   }
-  return(list(es_correct = es_correct, es_incorrect = es_incorrect,
-              es_correct_vs_true_mean = es_correct_vs_true_mean,
-              es_incorrect_vs_true_mean = es_incorrect_vs_true_mean))
+  return(list(
+    es_correct = es_correct, es_incorrect = es_incorrect,
+    es_correct_vs_true_mean = es_correct_vs_true_mean,
+    es_incorrect_vs_true_mean = es_incorrect_vs_true_mean,
+    term1_correct = term1_correct, term1_incorrect = term1_incorrect,
+    term1_correct_vs_true_mean = term1_correct_vs_true_mean,
+    term1_incorrect_vs_true_mean = term1_incorrect_vs_true_mean,
+    term2_correct = term2_correct, term2_incorrect = term2_incorrect,
+    term2_correct_vs_true_mean = term2_correct_vs_true_mean,
+    term2_incorrect_vs_true_mean = term2_incorrect_vs_true_mean
+  ))
 }
 
 # Helper functions
@@ -186,13 +332,27 @@ result_to_df <- function(result, n_counts, method = "mn") {
     es_incorrect_vs_true_mean = result$es_incorrect_vs_true_mean,
     es_diff = result$es_correct - result$es_incorrect,
     es_diff_true_mean_obs = result$es_correct_vs_true_mean - result$es_incorrect_vs_true_mean,
+    # Add term1 fields
+    term1_correct = result$term1_correct,
+    term1_incorrect = result$term1_incorrect,
+    term1_correct_vs_true_mean = result$term1_correct_vs_true_mean,
+    term1_incorrect_vs_true_mean = result$term1_incorrect_vs_true_mean,
+    term1_diff = result$term1_correct - result$term1_incorrect,
+    term1_diff_true_mean_obs = result$term1_correct_vs_true_mean - result$term1_incorrect_vs_true_mean,
+    # Add term2 fields
+    term2_correct = result$term2_correct,
+    term2_incorrect = result$term2_incorrect,
+    term2_correct_vs_true_mean = result$term2_correct_vs_true_mean,
+    term2_incorrect_vs_true_mean = result$term2_incorrect_vs_true_mean,
+    term2_diff = result$term2_correct - result$term2_incorrect,
+    term2_diff_true_mean_obs = result$term2_correct_vs_true_mean - result$term2_incorrect_vs_true_mean,
     n_counts = n_counts,
     method = method,
     sim_label = paste0(method, "_n", n_counts)
   )
 }
 
-run_simulation_experiment <- function(alpha, thetas, thetas_wrong,
+run_simulation_experiment <- function(alpha, alpha_wrong, n_samp = 100,
                                       n_counts_vec = c(1, 2, 3, 4, 5, 10, 25, 50, 100, 500),
                                       nsim = 1000, base_seed = 42,
                                       parallel = TRUE, n_cores = parallel::detectCores() - 2) {
@@ -200,10 +360,10 @@ run_simulation_experiment <- function(alpha, thetas, thetas_wrong,
   for (i in seq_along(n_counts_vec)) {
     n <- n_counts_vec[i]
     cat("  n_counts =", n, "...")
-    result_nonmn <- es_sampling(thetas = thetas, thetas_wrong = thetas_wrong, alpha = alpha,
+    result_nonmn <- es_sampling(alpha = alpha, alpha_wrong = alpha_wrong, n_samp = n_samp,
                                 seed = base_seed + i, nsim = nsim, n_counts = n,
                                 parallel = parallel, n_cores = n_cores)
-    result_mn <- es_mn_sampling(thetas = thetas, thetas_wrong = thetas_wrong, alpha = alpha,
+    result_mn <- es_mn_sampling(alpha = alpha, alpha_wrong = alpha_wrong, n_samp = n_samp,
                                seed = base_seed + 100 + i, nsim = nsim, n_counts = n,
                                parallel = parallel, n_cores = n_cores)
     results_list[[paste0("nonmn_", i)]] <- result_to_df(result_nonmn, n, "non-mn")
@@ -531,15 +691,11 @@ run_scenario <- function(scenario_config, n_samp = 100,
   cat("Alpha (wrong):", paste(scenario_config$alpha_wrong, collapse = ", "), "\n")
   cat("========================================\n")
 
-  # Pre-allocate distributions
-  thetas <- lapply(FUN = draw_one_dirichlet, X = rep(1, n_samp), alpha = scenario_config$alpha)
-  thetas_wrong <- lapply(FUN = draw_one_dirichlet, X = rep(1, n_samp), alpha = scenario_config$alpha_wrong)
-
-  # Run simulations
+  # Run simulations (forecasts now generated fresh for each iteration)
   df_results <- run_simulation_experiment(
     alpha = scenario_config$alpha,
-    thetas = thetas,
-    thetas_wrong = thetas_wrong,
+    alpha_wrong = scenario_config$alpha_wrong,
+    n_samp = n_samp,
     n_counts_vec = n_counts_vec,
     nsim = nsim,
     base_seed = scenario_config$base_seed,
