@@ -87,11 +87,15 @@ term_long <- term_summary %>%
     values_to = "value"
   ) %>%
   mutate(
-    term_type = case_when(
+    # Flip term2 by multiplying by -1 so that ES = term1 + (-term2) visually
+    value = ifelse(grepl("term2", metric), -value, value),
+    term_type = factor(case_when(
+      grepl("es", metric) ~ "Energy Score (ES = term1 + (-term2))",
       grepl("term1", metric) ~ "Term 1: E[||y - Y||] (distance from observation)",
-      grepl("term2", metric) ~ "Term 2: 0.5*E[||Y - Y'||] (distance between forecast samples)",
-      grepl("es", metric) ~ "Energy Score (ES = term1 - term2)"
-    ),
+      grepl("term2", metric) ~ "-Term 2: -0.5*E[||Y - Y'||] (negated penalty for spread)"
+    ), levels = c("Energy Score (ES = term1 + (-term2))",
+                  "Term 1: E[||y - Y||] (distance from observation)",
+                  "-Term 2: -0.5*E[||Y - Y'||] (negated penalty for spread)")),
     forecast_type = ifelse(grepl("_correct$", metric), "Correct Forecast", "Incorrect Forecast")
   )
 
@@ -103,13 +107,13 @@ symmetric_plot <- term_long %>%
              group = interaction(forecast_type, method))) +
   geom_line(linewidth = 0.8) +
   geom_point(size = 1.5) +
-  facet_grid(term_type ~ scenario_label, scales = "free_y") +
+  facet_grid(term_type ~ scenario_label, scales = "free_x") +
   scale_x_log10(breaks = c(1, 2, 5, 10, 25, 50, 100, 500)) +
   scale_color_manual(values = c("Correct Forecast" = "#1f77b4", "Incorrect Forecast" = "#d62728")) +
   scale_linetype_manual(values = c("mn" = "solid", "non-mn" = "dashed")) +
   labs(
     title = "Energy Score Term Decomposition: Symmetric Scenarios (α = 10, 10, 10)",
-    subtitle = "ES = term1 - term2. Note: different y-axis scales per row. Lower ES is better.",
+    subtitle = "ES = term1 + (-term2). Same y-axis scale across rows. Lower ES is better.",
     x = "N (sample size, log scale)",
     y = "Mean Value",
     color = "Forecast Type",
@@ -140,13 +144,13 @@ asymmetric_plot <- term_long %>%
              group = interaction(forecast_type, method))) +
   geom_line(linewidth = 0.8) +
   geom_point(size = 1.5) +
-  facet_grid(term_type ~ scenario_label, scales = "free_y") +
+  facet_grid(term_type ~ scenario_label, scales = "free_x") +
   scale_x_log10(breaks = c(1, 2, 5, 10, 25, 50, 100, 500)) +
   scale_color_manual(values = c("Correct Forecast" = "#1f77b4", "Incorrect Forecast" = "#d62728")) +
   scale_linetype_manual(values = c("mn" = "solid", "non-mn" = "dashed")) +
   labs(
     title = "Energy Score Term Decomposition: Asymmetric Scenarios (α = 2, 3, 15)",
-    subtitle = "ES = term1 - term2. Note: different y-axis scales per row. Lower ES is better.",
+    subtitle = "ES = term1 + (-term2). Same y-axis scale across rows. Lower ES is better.",
     x = "N (sample size, log scale)",
     y = "Mean Value",
     color = "Forecast Type",
