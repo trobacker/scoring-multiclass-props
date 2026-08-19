@@ -5,3 +5,9 @@
 .RProj
 
 writing/
+
+# Plot output — regeneratable from plotting scripts, not stored in git
+*.png
+
+.DS_Store
+.Rapp.history
