@@ -11,3 +11,6 @@ writing/
 
 .DS_Store
 .Rapp.history
+# Nowcast sample density plots (PNG/PDF) — regenerate with
+# results/nowcast_sample_densities/plot_nowcast_sample_densities.R
+results/nowcast_sample_densities/output/
