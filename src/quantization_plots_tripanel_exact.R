@@ -140,12 +140,12 @@ create_tripanel_exact_comparison <- function(n, alpha_dispersed, alpha_correct, 
 
   # Create PNG with layout for legend
   filename <- paste0("quantization_", scenario_name, "_N", n, ".png")
-  png(file.path(output_dir, filename), width = 2200, height = 700, res = 150)
+  png(file.path(output_dir, filename), width = 5200, height = 1400, res = 300)
 
   # Create layout: 3 ternary plots + 1 legend panel
-  layout(matrix(c(1, 2, 3, 4), nrow = 1), widths = c(3, 3, 3, 1))
+  layout(matrix(c(1, 2, 3, 4), nrow = 1), widths = c(3, 3, 3, 1.7))
 
-  par(mar = c(1, 1, 2.5, 1))
+  par(mar = c(1, 1, 4.5, 1))
 
   # LEFT PANEL: Dispersed forecast
   TernaryPlot(
@@ -154,11 +154,11 @@ create_tripanel_exact_comparison <- function(n, alpha_dispersed, alpha_correct, 
     clab = "p3",
     grid.lines = 5,
     point = "right",
-    lab.cex = 0.8,
+    lab.cex = 1.5,
     grid.minor.lines = 0,
     grid.lty = "solid",
     col = rgb(0.9, 0.9, 0.9),
-    axis.cex = 0.7,
+    axis.cex = 1.4,
     padding = 0.08
   )
 
@@ -183,7 +183,7 @@ create_tripanel_exact_comparison <- function(n, alpha_dispersed, alpha_correct, 
     lwd = border_width
   )
 
-  title(main = "Dispersed", cex.main = 1.5, font.main = 2, line = -2)
+  title(main = "Dispersed", cex.main = 2.8, font.main = 2, line = -2)
 
   # MIDDLE PANEL: Correct forecast
   TernaryPlot(
@@ -192,11 +192,11 @@ create_tripanel_exact_comparison <- function(n, alpha_dispersed, alpha_correct, 
     clab = "p3",
     grid.lines = 5,
     point = "right",
-    lab.cex = 0.8,
+    lab.cex = 1.5,
     grid.minor.lines = 0,
     grid.lty = "solid",
     col = rgb(0.9, 0.9, 0.9),
-    axis.cex = 0.7,
+    axis.cex = 1.4,
     padding = 0.08
   )
 
@@ -218,7 +218,7 @@ create_tripanel_exact_comparison <- function(n, alpha_dispersed, alpha_correct, 
     lwd = border_width
   )
 
-  title(main = "Correct", cex.main = 1.5, font.main = 2, line = -2)
+  title(main = "Correct", cex.main = 2.8, font.main = 2, line = -2)
 
   # RIGHT PANEL: Narrow forecast
   TernaryPlot(
@@ -227,11 +227,11 @@ create_tripanel_exact_comparison <- function(n, alpha_dispersed, alpha_correct, 
     clab = "p3",
     grid.lines = 5,
     point = "right",
-    lab.cex = 0.8,
+    lab.cex = 1.5,
     grid.minor.lines = 0,
     grid.lty = "solid",
     col = rgb(0.9, 0.9, 0.9),
-    axis.cex = 0.7,
+    axis.cex = 1.4,
     padding = 0.08
   )
 
@@ -253,7 +253,7 @@ create_tripanel_exact_comparison <- function(n, alpha_dispersed, alpha_correct, 
     lwd = border_width
   )
 
-  title(main = "Narrow", cex.main = 1.5, font.main = 2, line = -2)
+  title(main = "Narrow", cex.main = 2.8, font.main = 2, line = -2)
 
   # LEGEND PANEL
   par(mar = c(2, 0, 3, 2))
@@ -263,11 +263,11 @@ create_tripanel_exact_comparison <- function(n, alpha_dispersed, alpha_correct, 
   legend("topleft",
          legend = c("Dirichlet Samples", "Exact Multinomial Probs"),
          pch = c(16, 21),
-         pt.cex = c(1.8, 2),
+         pt.cex = c(3.2, 3.6),
          col = c(rgb(30/255, 144/255, 255/255, 0.5), "black"),
          pt.bg = c(NA, color_palette[50]),
          bty = "n",
-         cex = 0.95,
+         cex = 1.7,
          title = "Distribution",
          title.adj = 0)
 
@@ -287,7 +287,7 @@ create_tripanel_exact_comparison <- function(n, alpha_dispersed, alpha_correct, 
   bar_left <- 0.15
   bar_right <- 0.35
   bar_bottom <- 0.15
-  bar_top <- 0.75
+  bar_top <- 0.55
 
   # Draw color bar
   for (i in 1:(n_bar_steps - 1)) {
@@ -300,28 +300,28 @@ create_tripanel_exact_comparison <- function(n, alpha_dispersed, alpha_correct, 
 
   # Add labels to color bar (use scientific notation if range is large)
   if (max_prob / min_prob > 100) {
-    text(bar_right + 0.05, bar_top, sprintf("%.1e", max_prob), adj = 0, cex = 0.8)
+    text(bar_right + 0.05, bar_top, sprintf("%.1e", max_prob), adj = 0, cex = 1.5)
     text(bar_right + 0.05, (bar_top + bar_bottom) / 2,
-         sprintf("%.1e", 10^((log10(max_prob) + log10(min_prob)) / 2)), adj = 0, cex = 0.8)
-    text(bar_right + 0.05, bar_bottom, sprintf("%.1e", min_prob), adj = 0, cex = 0.8)
+         sprintf("%.1e", 10^((log10(max_prob) + log10(min_prob)) / 2)), adj = 0, cex = 1.5)
+    text(bar_right + 0.05, bar_bottom, sprintf("%.1e", min_prob), adj = 0, cex = 1.5)
   } else {
-    text(bar_right + 0.05, bar_top, sprintf("%.4f", max_prob), adj = 0, cex = 0.8)
+    text(bar_right + 0.05, bar_top, sprintf("%.4f", max_prob), adj = 0, cex = 1.5)
     text(bar_right + 0.05, (bar_top + bar_bottom) / 2,
-         sprintf("%.4f", (max_prob + min_prob) / 2), adj = 0, cex = 0.8)
-    text(bar_right + 0.05, bar_bottom, sprintf("%.4f", min_prob), adj = 0, cex = 0.8)
+         sprintf("%.4f", (max_prob + min_prob) / 2), adj = 0, cex = 1.5)
+    text(bar_right + 0.05, bar_bottom, sprintf("%.4f", min_prob), adj = 0, cex = 1.5)
   }
 
   # Add title for color scale
   text((bar_left + bar_right) / 2, bar_top + 0.08, "Probability",
-       cex = 0.95, font = 2, adj = 0.5)
+       cex = 1.7, font = 2, adj = 0.5)
 
   # Add note about size
-  text(0.5, 0.05, "Size \u221d P^(1/3)", cex = 0.8, adj = 0.5)
+  text(0.5, 0.05, "Size ~ P^(1/3)", cex = 1.5, adj = 0.5)
 
-  par(fig = c(0, 1, 0, 1), oma = c(0, 0, 7, 0), mar = c(0, 0, 0, 0), new = TRUE)
+  par(fig = c(0, 1, 0, 1), oma = c(0, 0, 10.5, 0), mar = c(0, 0, 0, 0), new = TRUE)
   plot.new()
   mtext(paste0("N = ", n),
-        side = 3, line = 4, cex = 1.4, font = 2)
+        side = 3, line = 7, cex = 2.6, font = 2)
 
   dev.off()
 

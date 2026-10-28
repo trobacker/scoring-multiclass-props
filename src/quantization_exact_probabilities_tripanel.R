@@ -186,27 +186,27 @@ create_tripanel_probability_comparison <- function(n, alpha_dispersed, alpha_cor
 
   # Create PNG with layout for legend
   filename <- paste0("exact_prob_", scenario_name, "_N", n, ".png")
-  png(file.path(output_dir, filename), width = 2200, height = 700, res = 150)
+  png(file.path(output_dir, filename), width = 5200, height = 1400, res = 300)
 
   # Create layout: 3 ternary plots + 1 legend panel
-  layout(matrix(c(1, 2, 3, 4), nrow = 1), widths = c(3, 3, 3, 1))
+  layout(matrix(c(1, 2, 3, 4), nrow = 1), widths = c(3, 3, 3, 1.7))
 
   # LEFT PANEL: Dispersed forecast
-  par(mar = c(2, 2, 2, 2))
+  par(mar = c(2, 2, 4, 2))
   TernaryPlot(
     alab = "p1 \u2192",
     blab = "\u2190 p2",
     clab = "p3 \u2192",
     grid.lines = 5,
     point = "right",
-    lab.cex = 0.8,
+    lab.cex = 1.5,
     grid.minor.lines = 0,
     grid.lty = "solid",
     col = rgb(0.9, 0.9, 0.9),
     grid.col = "white",
     axis.col = rgb(0.6, 0.6, 0.6),
     ticks.col = rgb(0.6, 0.6, 0.6),
-    axis.cex = 0.7,
+    axis.cex = 1.4,
     axis.rotate = FALSE,
     padding = 0.08
   )
@@ -227,24 +227,24 @@ create_tripanel_probability_comparison <- function(n, alpha_dispersed, alpha_cor
                bg = dispersed_colors,  # Fill color
                lwd = border_width)
 
-  title(main = "Dispersed", cex.main = 1.5, font.main = 2, line = -0.5)
+  title(main = "Dispersed", cex.main = 2.8, font.main = 2, line = -0.5)
 
   # MIDDLE PANEL: Correct forecast
-  par(mar = c(2, 2, 2, 2))
+  par(mar = c(2, 2, 4, 2))
   TernaryPlot(
     alab = "p1 \u2192",
     blab = "\u2190 p2",
     clab = "p3 \u2192",
     grid.lines = 5,
     point = "right",
-    lab.cex = 0.8,
+    lab.cex = 1.5,
     grid.minor.lines = 0,
     grid.lty = "solid",
     col = rgb(0.9, 0.9, 0.9),
     grid.col = "white",
     axis.col = rgb(0.6, 0.6, 0.6),
     ticks.col = rgb(0.6, 0.6, 0.6),
-    axis.cex = 0.7,
+    axis.cex = 1.4,
     axis.rotate = FALSE,
     padding = 0.08
   )
@@ -265,24 +265,24 @@ create_tripanel_probability_comparison <- function(n, alpha_dispersed, alpha_cor
                bg = correct_colors,
                lwd = border_width)
 
-  title(main = "Correct", cex.main = 1.5, font.main = 2, line = -0.5)
+  title(main = "Correct", cex.main = 2.8, font.main = 2, line = -0.5)
 
   # RIGHT PANEL: Narrow forecast
-  par(mar = c(2, 2, 2, 2))
+  par(mar = c(2, 2, 4, 2))
   TernaryPlot(
     alab = "p1 \u2192",
     blab = "\u2190 p2",
     clab = "p3 \u2192",
     grid.lines = 5,
     point = "right",
-    lab.cex = 0.8,
+    lab.cex = 1.5,
     grid.minor.lines = 0,
     grid.lty = "solid",
     col = rgb(0.9, 0.9, 0.9),
     grid.col = "white",
     axis.col = rgb(0.6, 0.6, 0.6),
     ticks.col = rgb(0.6, 0.6, 0.6),
-    axis.cex = 0.7,
+    axis.cex = 1.4,
     axis.rotate = FALSE,
     padding = 0.08
   )
@@ -303,7 +303,7 @@ create_tripanel_probability_comparison <- function(n, alpha_dispersed, alpha_cor
                bg = narrow_colors,
                lwd = border_width)
 
-  title(main = "Narrow", cex.main = 1.5, font.main = 2, line = -0.5)
+  title(main = "Narrow", cex.main = 2.8, font.main = 2, line = -0.5)
 
   # LEGEND PANEL
   par(mar = c(2, 0, 3, 2))
@@ -311,13 +311,13 @@ create_tripanel_probability_comparison <- function(n, alpha_dispersed, alpha_cor
 
   # Add distribution legend
   legend("topleft",
-         legend = c("Dirichlet Prior", "Multinomial Outcomes"),
+         legend = c("Dirichlet Prior", "Exact Multinomial Probs"),
          pch = c(15, 21),
-         pt.cex = c(1, 2),
+         pt.cex = c(1.9, 3.6),
          col = c(viridis(1, alpha = 0.7, begin = 0.5, end = 0.5, direction = 1), "black"),
          pt.bg = c(NA, viridis(1, alpha = 1.0, begin = 0.8, end = 0.8, direction = 1)),
          bty = "n",
-         cex = 0.95,
+         cex = 1.7,
          title = "Distribution",
          title.adj = 0)
 
@@ -331,7 +331,7 @@ create_tripanel_probability_comparison <- function(n, alpha_dispersed, alpha_cor
   bar_left <- 0.15
   bar_right <- 0.35
   bar_bottom <- 0.15
-  bar_top <- 0.75
+  bar_top <- 0.58
 
   # Draw color bar
   for (i in 1:(n_bar_steps - 1)) {
@@ -349,28 +349,28 @@ create_tripanel_probability_comparison <- function(n, alpha_dispersed, alpha_cor
 
   # Use log scale for labels if range is large
   if (max_prob / min_prob > 100) {
-    text(bar_right + 0.05, bar_top, sprintf("%.1e", max_prob), adj = 0, cex = 0.8)
+    text(bar_right + 0.05, bar_top, sprintf("%.1e", max_prob), adj = 0, cex = 1.5)
     text(bar_right + 0.05, (bar_top + bar_bottom) / 2,
-         sprintf("%.1e", 10^((log10(max_prob) + log10(min_prob)) / 2)), adj = 0, cex = 0.8)
-    text(bar_right + 0.05, bar_bottom, sprintf("%.1e", min_prob), adj = 0, cex = 0.8)
+         sprintf("%.1e", 10^((log10(max_prob) + log10(min_prob)) / 2)), adj = 0, cex = 1.5)
+    text(bar_right + 0.05, bar_bottom, sprintf("%.1e", min_prob), adj = 0, cex = 1.5)
   } else {
-    text(bar_right + 0.05, bar_top, sprintf("%.4f", max_prob), adj = 0, cex = 0.8)
+    text(bar_right + 0.05, bar_top, sprintf("%.4f", max_prob), adj = 0, cex = 1.5)
     text(bar_right + 0.05, (bar_top + bar_bottom) / 2,
-         sprintf("%.4f", (max_prob + min_prob) / 2), adj = 0, cex = 0.8)
-    text(bar_right + 0.05, bar_bottom, sprintf("%.4f", min_prob), adj = 0, cex = 0.8)
+         sprintf("%.4f", (max_prob + min_prob) / 2), adj = 0, cex = 1.5)
+    text(bar_right + 0.05, bar_bottom, sprintf("%.4f", min_prob), adj = 0, cex = 1.5)
   }
 
   # Add title for color scale
   text((bar_left + bar_right) / 2, bar_top + 0.08, "Probability",
-       cex = 0.95, font = 2, adj = 0.5)
+       cex = 1.7, font = 2, adj = 0.5)
 
   # Add note about size
-  text(0.5, 0.05, "Size \u221d P^(1/3)", cex = 0.8, adj = 0.5)
+  text(0.5, 0.05, "Size ~ P^(1/3)", cex = 1.5, adj = 0.5)
 
-  par(fig = c(0, 1, 0, 1), oma = c(0, 0, 5.0, 0), mar = c(0, 0, 0, 0), new = TRUE)
+  par(fig = c(0, 1, 0, 1), oma = c(0, 0, 8.5, 0), mar = c(0, 0, 0, 0), new = TRUE)
   plot.new()
   mtext(paste0("N = ", n),
-        side = 3, line = 3.5, cex = 1.4, font = 2)
+        side = 3, line = 6, cex = 2.6, font = 2)
 
   dev.off()
 
