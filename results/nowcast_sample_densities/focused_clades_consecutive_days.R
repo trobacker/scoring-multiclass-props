@@ -1,6 +1,6 @@
-# Focused playground for plot_nowcast_sample_densities.R: a few consecutive
-# target dates, a chosen set of clades (all other clades summed into
-# "other"), and target dates on the x-axis.
+# Chosen clades over a few consecutive target dates, using
+# plot_nowcast_sample_densities.R: all other clades are summed into "other",
+# and target dates are on the x-axis.
 #
 # Edit the settings below and run the script top to bottom. After the first
 # run, plot settings (colours, alpha, dates, free_y, trim, rug) can be

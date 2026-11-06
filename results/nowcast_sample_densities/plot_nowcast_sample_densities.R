@@ -62,7 +62,8 @@
 #                   PDF.            [default results/nowcast_sample_densities/
 #                                    output/<date>_<locs>_<models>.png/.pdf]
 #
-# The functions can also be used interactively (see local_play.R):
+# The functions can also be used interactively (see all_clades_by_horizon.R,
+# clades_nowcast.R and focused_clades_consecutive_days.R):
 #   source("results/nowcast_sample_densities/plot_nowcast_sample_densities.R")
 #   s <- load_hub_samples("../variant-nowcast-hub", "2026-10-14", "MA",
 #                         c("UMass-HMLR", "Hub-baseline"))

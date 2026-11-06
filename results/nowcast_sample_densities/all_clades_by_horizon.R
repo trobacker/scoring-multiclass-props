@@ -1,4 +1,5 @@
-# Interactive playground for plot_nowcast_sample_densities.R
+# All clades at selected horizons, one page per state, using
+# plot_nowcast_sample_densities.R.
 #
 # Edit the settings below and run the script top to bottom. After the first
 # run, plot settings (colours, alpha, horizons, free_y, trim, rug) can be
