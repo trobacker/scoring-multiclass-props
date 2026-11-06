@@ -14,3 +14,11 @@ writing/
 # Nowcast sample density plots (PNG/PDF) — regenerate with
 # results/nowcast_sample_densities/plot_nowcast_sample_densities.R
 results/nowcast_sample_densities/output/
+
+# Notes, rendered documents and text drafts stay local. Already-tracked files
+# (e.g. README.md, CLAUDE.md, docs/*.md) are unaffected and stay tracked.
+*.md
+*.txt
+*.html
+# Supporting files for rendered HTML (Quarto/R Markdown)
+*_files/

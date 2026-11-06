@@ -1,4 +1,5 @@
-# Interactive playground for plot_nowcast_sample_densities.R
+# All clades at selected horizons, one page per state, using
+# plot_nowcast_sample_densities.R.
 #
 # Edit the settings below and run the script top to bottom. After the first
 # run, plot settings (colours, alpha, horizons, free_y, trim, rug) can be
@@ -18,15 +19,15 @@ source(here("results", "nowcast_sample_densities",
 
 # ---- Settings to toggle ----
 hub_path     <- "~/GitHub/variant-nowcast-hub"
-nowcast_date <- "2026-05-06"                     # final eval data: 2026-07-22 or earlier
+nowcast_date <- "2024-12-25"                     # final eval data: 2026-07-22 or earlier
 locations    <- c("CA", "IL", "MA")              # one page per state; "all" = every submitted state
 models       <- c("UMass-HMLR", "Hub-baseline")  # 1 or 2 models
 model_colors <- c("#881C1C", "#0ba7e0")          # same order as models; hex or R names 2b6cb0
-horizons     <- seq(-28, 7, by = 7)              # days relative to nowcast date (-31 to 10)
+horizons     <- seq(-28, 10, by = 7)              # days relative to nowcast date (-31 to 10)
 alpha        <- 0.4                              # density fill opacity
 free_y       <- FALSE                            # TRUE = per-clade y scales instead of [0, 1]
-trim         <- FALSE                             # FALSE = densities extend past the samples
-rug          <- TRUE                            # TRUE = tick for each of the 100 samples
+trim         <- TRUE                             # FALSE = densities extend past the samples
+rug          <- FALSE                            # TRUE = tick for each of the 100 samples
 show_eval    <- TRUE                             # FALSE = skip observed / possible outcomes
 
 # ---- Load data ----
