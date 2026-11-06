@@ -16,6 +16,10 @@
 #
 # With several locations, each location is one page of a single PDF.
 #
+# Optionally, only chosen clades are kept and all others are summed into
+# "other" (per sample for forecasts, per date for observed counts); see
+# collapse_clades() and default_clades().
+#
 # Usage (run from the scoring-multiclass-props repo root):
 #   Rscript results/nowcast_sample_densities/plot_nowcast_sample_densities.R \
 #     --nowcast-date=2026-10-14 --location=MA \
@@ -48,6 +52,11 @@
 #   --rug           If set, draw each sample as a short tick to the left of
 #                   its time point (one column of ticks per model).
 #   --no-eval       If set, do not overlay evaluation (oracle) data.
+#   --clades        Clades to keep, comma-separated (e.g. 25B,25C); all
+#                   others are summed into "other". "auto" picks the top two
+#                   (see default_clades()).        [default: all clades]
+#   --date-axis     If set, label the x-axis with target dates instead of
+#                   days relative to the nowcast date (N stays on top).
 #   --out           Output file. A single location is saved as PNG unless
 #                   the name ends in .pdf; several locations always give a
 #                   PDF.            [default results/nowcast_sample_densities/
@@ -171,6 +180,67 @@ parse_horizons <- function(x) {
   }
 }
 
+#' Pick default clades to plot for a round: the `n` named clades (excluding
+#' "other" and "recombinant") with the most sequences nationally in the 3
+#' weeks before the round, from the hub's modeled-clades file. Rounds before
+#' 2025-04-16 have no counts in that file; for those, fall back to the clades
+#' with the highest mean predicted proportion in `samples`.
+default_clades <- function(hub_path, nowcast_date, samples = NULL, n = 2) {
+  exclude <- c("other", "recombinant")
+  f <- file.path(hub_path, "auxiliary-data", "modeled-clades",
+                 paste0(as.Date(nowcast_date), ".json"))
+  counts <- if (file.exists(f)) {
+    meta <- jsonlite::fromJSON(f)
+    by_clade <- unlist(meta$meta$sequence_counts$sequences_by_clade)
+    # Counts can include clades that were not modeled this round.
+    by_clade[names(by_clade) %in% setdiff(meta$clades, exclude)]
+  }
+  if (length(counts) > 0) {
+    top <- names(sort(counts, decreasing = TRUE))[seq_len(min(n, length(counts)))]
+    message("Default clades (hub national sequence counts, 3 weeks before ",
+            "the round): ", paste(top, collapse = ", "))
+    return(top)
+  }
+  if (is.null(samples)) {
+    stop("No sequence counts in ", f, "; pass `samples` to rank clades by ",
+         "predicted proportion instead.")
+  }
+  top <- samples |>
+    filter(!clade %in% exclude) |>
+    group_by(clade) |>
+    summarise(mean = mean(value), .groups = "drop") |>
+    slice_max(mean, n = n, with_ties = FALSE) |>
+    pull(clade)
+  message("Default clades (no hub sequence counts for this round; highest ",
+          "mean predicted proportion): ", paste(top, collapse = ", "))
+  top
+}
+
+#' Keep `clades` and sum every other clade into "other".
+#'
+#' Works for samples (value_col = "value", summed within each sample, so each
+#' sample still sums to 1) and for eval data (value_col = "oracle_value").
+#' Clade becomes a factor ordered as `clades`, then "other", which sets the
+#' facet order.
+collapse_clades <- function(df, clades, value_col = "value") {
+  missing <- setdiff(clades, unique(df$clade))
+  if (length(missing) > 0) {
+    warning("Clades not in data: ", paste(missing, collapse = ", "))
+  }
+  # Summarising sorts rows by the grouping columns; keep the original model
+  # order, which plot_sample_densities() uses for colours and the legend.
+  model_order <- if ("model_id" %in% names(df)) unique(df$model_id)
+  out <- df |>
+    mutate(clade = ifelse(clade %in% clades, clade, "other")) |>
+    group_by(across(-all_of(value_col))) |>
+    summarise(!!value_col := sum(.data[[value_col]]), .groups = "drop") |>
+    mutate(clade = factor(clade, levels = unique(c(clades, "other"))))
+  if (!is.null(model_order)) {
+    out <- arrange(out, match(model_id, model_order))
+  }
+  out
+}
+
 # ---------------------------------------------------------------------------
 # Plotting
 # ---------------------------------------------------------------------------
@@ -187,13 +257,16 @@ parse_horizons <- function(x) {
 #'   If FALSE, densities extend to the [0, 1] bounds.
 #' @param rug Draw each sample as a short tick left of its time point.
 #' @param eval_data Output of load_eval_data(), or NULL to skip.
+#' @param date_axis Label the x-axis with target dates instead of days
+#'   relative to the nowcast date. N (with eval data) stays on the top axis.
 #' @param slab_scale Fraction of the spacing between horizons that a density
 #'   may occupy to the right of its time point.
 plot_sample_densities <- function(samples, horizons,
                                   model_colors = c("#2b6cb0", "#c05621"),
                                   alpha = 0.4, free_y = FALSE,
                                   trim = TRUE, rug = FALSE,
-                                  eval_data = NULL, slab_scale = 0.9) {
+                                  eval_data = NULL, date_axis = FALSE,
+                                  slab_scale = 0.9) {
   models <- unique(samples$model_id)
   if (length(models) > 2) stop("At most 2 models are supported for now.")
   if (length(model_colors) < length(models)) {
@@ -255,7 +328,9 @@ plot_sample_densities <- function(samples, horizons,
 
   nowcast_date <- unique(samples$nowcast_date)
   location <- unique(samples$location)
-  top_labels <- format(nowcast_date + horizons, "%b %d")
+  date_labels <- format(nowcast_date + horizons, "%b %d")
+  # Top axis: dates (and N) in horizon mode; only N in date mode.
+  top_labels <- if (date_axis) NULL else date_labels
   subtitle <- "Densities of 100 submitted samples per model and target date; points are medians"
   # Observed-proportion layer, added after the medians so it is drawn on top.
   observed_layer <- NULL
@@ -283,11 +358,23 @@ plot_sample_densities <- function(samples, horizons,
 
     n_by_h <- distinct(ev, horizon, N)
     n_lab <- n_by_h$N[match(horizons, n_by_h$horizon)]
-    top_labels <- paste0(top_labels, "\nN=", ifelse(is.na(n_lab), "?", n_lab))
+    n_text <- paste0("N=", ifelse(is.na(n_lab), "?", n_lab))
+    top_labels <- if (date_axis) n_text else paste0(top_labels, "\n", n_text)
     subtitle <- paste0(
       subtitle,
       "\nHollow circles: possible observed proportions k/N; filled circle: observed proportion"
     )
+  }
+
+  # Only mark the nowcast date when it falls within the plotted dates;
+  # otherwise the line would stretch the x-axis out to it.
+  show_nowcast <- min(horizons) <= 0 && max(horizons) >= 0
+  nowcast_line <- if (show_nowcast) {
+    geom_vline(xintercept = 0, linetype = "dashed", colour = "grey40",
+               linewidth = 0.3)
+  }
+  if (date_axis && show_nowcast) {
+    subtitle <- paste0(subtitle, "; dashed line: nowcast date")
   }
 
   p +
@@ -295,15 +382,16 @@ plot_sample_densities <- function(samples, horizons,
                  fun = median, geom = "point", shape = 21, size = 1.3,
                  stroke = 0.3, colour = "white", show.legend = FALSE) +
     observed_layer +
-    geom_vline(xintercept = 0, linetype = "dashed", colour = "grey40",
-               linewidth = 0.3) +
+    nowcast_line +
     facet_wrap(~ clade, scales = if (free_y) "free_y" else "fixed") +
     scale_x_continuous(
       breaks = horizons,
-      sec.axis = dup_axis(
-        name = NULL, breaks = horizons,
-        labels = top_labels
-      )
+      labels = if (date_axis) date_labels else waiver(),
+      sec.axis = if (is.null(top_labels)) {
+        waiver()
+      } else {
+        dup_axis(name = NULL, breaks = horizons, labels = top_labels)
+      }
     ) +
     # Zoom rather than set scale limits, so densities touching 0 or 1 are not
     # dropped.
@@ -311,7 +399,7 @@ plot_sample_densities <- function(samples, horizons,
     scale_fill_manual(values = model_colors, name = NULL) +
     scale_colour_manual(values = model_colors, name = NULL) +
     labs(
-      x = "Days relative to nowcast date",
+      x = if (date_axis) "Target date" else "Days relative to nowcast date",
       y = "Clade proportion",
       title = sprintf("Submitted sample distributions: %s, nowcast date %s",
                       location, nowcast_date),
@@ -321,7 +409,11 @@ plot_sample_densities <- function(samples, horizons,
     theme(
       legend.position = "top",
       panel.grid.minor = element_blank(),
-      axis.text.x.top = element_text(size = 6, angle = 45, hjust = 0),
+      axis.text.x.top = if (date_axis) {
+        element_text(size = 7)
+      } else {
+        element_text(size = 6, angle = 45, hjust = 0)
+      },
       axis.text.x.bottom = element_text(size = 7)
     )
 }
@@ -373,7 +465,7 @@ save_state_pages <- function(samples, file,
 # ---------------------------------------------------------------------------
 
 parse_args <- function(args) {
-  flags <- c("free-y", "no-trim", "rug", "no-eval")
+  flags <- c("free-y", "no-trim", "rug", "no-eval", "date-axis")
   out <- list()
   for (a in args) {
     a <- sub("^--", "", a)
@@ -415,6 +507,19 @@ if (sys.nframe() == 0) {
   }
   if (identical(locations, "all")) locations <- sort(unique(samples$location))
 
+  clades <- args[["clades"]]
+  if (!is.null(clades)) {
+    clades <- if (clades == "auto") {
+      default_clades(hub_path, args[["nowcast-date"]], samples)
+    } else {
+      strsplit(clades, ",", fixed = TRUE)[[1]]
+    }
+    samples <- collapse_clades(samples, clades, "value")
+    if (!is.null(eval_data)) {
+      eval_data <- collapse_clades(eval_data, clades, "oracle_value")
+    }
+  }
+
   multi <- length(locations) > 1
   loc_label <- if (length(locations) > 5) {
     paste0(length(locations), "locs")
@@ -423,13 +528,16 @@ if (sys.nframe() == 0) {
   }
   out <- args[["out"]] %||% file.path(
     "results/nowcast_sample_densities/output",
-    sprintf("%s_%s_%s%s%s%s.%s", args[["nowcast-date"]], loc_label,
-            paste(models, collapse = "_vs_"), if (free_y) "_freey" else "",
+    sprintf("%s_%s_%s%s%s%s%s.%s", args[["nowcast-date"]], loc_label,
+            paste(models, collapse = "_vs_"),
+            if (is.null(clades)) "" else paste0("_", paste(clades, collapse = "-")),
+            if (free_y) "_freey" else "",
             if (trim) "" else "_notrim", if (rug) "_rug" else "",
             if (multi) "pdf" else "png")
   )
   plot_args <- list(horizons = horizons, model_colors = model_colors,
-                    alpha = alpha, free_y = free_y, trim = trim, rug = rug)
+                    alpha = alpha, free_y = free_y, trim = trim, rug = rug,
+                    date_axis = isTRUE(args[["date-axis"]]))
 
   if (multi || grepl("\\.pdf$", out)) {
     do.call(save_state_pages, c(list(samples, out, locations = locations,
